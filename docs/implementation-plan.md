@@ -189,9 +189,17 @@ measured against the truth.
 
 **Build**
 
-- `config`: robot section with rail position and length, lens reference point, tilt axis,
-  limits for speed and acceleration of rail, tilt and focus, cinema field of view and depth
-  of field, stereo camera field of view, control rate.
+- `config/robot.yaml`: every robot parameter in its own file, so real values can replace
+  the assumptions without touching code: rail position and length, lens reference point,
+  tilt axis, limits for speed and acceleration of rail, tilt and focus, cinema field of view
+  and depth of field, stereo camera field of view, baseline and noise, control rate. Each
+  value has a comment with its unit and its source: `video` (stated in Jeremy Fielding's
+  videos), `assumed`, or `measured` (with date and who measured it). The values known from
+  the videos are listed in `docs/robot-interface.md`.
+- `shared/config.py`: load `config/robot.yaml`; a command-line option selects another robot
+  file, so several robot variants can be compared.
+- Simulator window: sliders for the speed and acceleration limits of rail and tilt, for
+  trying values live. The file stays the source of the values a run starts with.
 - `robot_emulator/motion.py`: rail, tilt and focus as limited second-order axes.
 - `robot_emulator/stereo.py`: what the robot's stereo camera sees: blobs with image
   position, size and measured distance, with noise.
@@ -210,6 +218,8 @@ measured against the truth.
 **Done when**
 
 - Selecting a bee makes the robot swing to it and follow it.
+- Changing a value in `config/robot.yaml` changes the behaviour on the next start, with no
+  code change. A test loads a robot file with changed limits and checks the axes obey them.
 - A test scenario in which a larger bee crosses the search window does not change the
   followed bee.
 - A 60 s run prints time in frame and time in focus. Record the numbers in `CHANGELOG.md`.
