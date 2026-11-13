@@ -85,9 +85,9 @@ PAGE_PATH = Path(__file__).parent / "web" / "index.html"
 SNAPSHOT_RATE_HZ = 30
 # `track_id` of a detection that no track used.
 UNUSED_DETECTION = -1
-# Most other bees listed in one `target`. Sixteen entries keep the datagram well below the
+# Most other bees listed in one `target`. Eight entries keep the datagram well below the
 # 1400 bytes a `target` may have; the bees nearest to the target in the image are kept.
-MAX_OTHERS = 16
+MAX_OTHERS = 8
 
 
 @dataclass
@@ -309,7 +309,11 @@ def _others_in_view(tracker: Tracker, selected: Track, pose: RobotPose) -> tuple
     offsets_px = np.linalg.norm(pixels_px[1:] - pixels_px[0], axis=1)
     order = [i for i in np.argsort(offsets_px, kind="stable") if visible[i + 1]]
     return tuple(
-        OtherBee(others[i].id, tuple(float(x) for x in others[i].state[:_AXES]))
+        OtherBee(
+            others[i].id,
+            tuple(float(x) for x in others[i].state[:_AXES]),
+            tuple(float(x) for x in others[i].state[_AXES : 2 * _AXES]),
+        )
         for i in order[:MAX_OTHERS]
     )
 

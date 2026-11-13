@@ -66,13 +66,19 @@ def step_axis(
     Args:
         axis: Axis state, modified in place (m, m/s or rad, rad/s).
         limits: Travel, speed and acceleration limits of this axis.
-        target_position: Wanted position in m or rad; clipped to the travel.
+        target_position: Wanted position at the end of the step in m or rad; clipped to
+            the travel.
         target_velocity: Velocity of the target in m/s or rad/s, used as
             feed-forward so a moving target is followed without lag.
         dt_s: Control step in s, greater than zero.
     """
     target = max(limits.lower, min(limits.upper, target_position))
-    error = target - axis.position
+    # A target beyond the travel does not move for the axis: no feed-forward into the stop.
+    if target != target_position:
+        target_velocity = 0.0
+    # The target position is for the end of the step. The feed-forward alone already
+    # covers target_velocity * dt_s of the way, so only the rest is error.
+    error = target - (axis.position + target_velocity * dt_s)
     direction = math.copysign(1.0, error)
     approach = _approach_speed(abs(error), limits.max_acceleration, dt_s)
     desired = _clip(target_velocity + direction * approach, limits.max_speed)

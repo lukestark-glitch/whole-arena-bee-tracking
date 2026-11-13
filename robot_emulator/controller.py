@@ -78,8 +78,9 @@ def create_controller(robot: Robot) -> Controller:
 def receive_target(controller: Controller, target: Target) -> None:
     """Take in a `target` message; an older one than the current is dropped.
 
-    On a change of track the stereo lock and correction are dropped, so focus presets
-    from `distance_m` while the camera swings over.
+    On a change of track, and after a silence longer than `target_timeout_s`, the stereo
+    lock and correction are dropped, so focus presets from `distance_m` while the camera
+    swings over.
 
     Args:
         controller: Controller, modified in place.
@@ -89,7 +90,13 @@ def receive_target(controller: Controller, target: Target) -> None:
     # UDP may reorder; the protocol orders messages by t, not by arrival.
     if current is not None and target.t <= current.t:
         return
-    if current is None or current.track_id != target.track_id:
+    timeout_s = controller.robot.control.target_timeout_s
+    # After a silence the old stereo measurement says nothing about where the bee is now.
+    if (
+        current is None
+        or current.track_id != target.track_id
+        or target.t - current.t > timeout_s
+    ):
         controller.locked = False
         controller.correction_m = np.zeros(_AXES)
     controller.target = target
@@ -103,10 +110,12 @@ def has_target(controller: Controller, t_s: float) -> bool:
         t_s: Current simulation time (s).
 
     Returns:
-        False before the first `target` and after a silence of `target_timeout_s`.
+        False before the first `target`, after a silence of `target_timeout_s`, and for a
+        target from the future (a leftover of a run before a restart).
     """
     target = controller.target
-    return target is not None and t_s - target.t <= controller.robot.control.target_timeout_s
+    timeout_s = controller.robot.control.target_timeout_s
+    return target is not None and 0.0 <= t_s - target.t <= timeout_s
 
 
 def predict_target(target: Target, t_s: float) -> tuple[np.ndarray, np.ndarray]:
@@ -200,7 +209,9 @@ def apply_exposure(controller: Controller, t_s: float, blobs: list[Blob]) -> Non
     model = controller.robot.stereo.model
     pose = robot_camera_pose(controller.robot, controller.rail.position, controller.tilt.position)
     predicted_m, _ = predict_target(target, t_s)
-    points_m = np.array([predicted_m] + [other.pos for other in target.others])
+    # The other bees are carried on to the exposure time with their velocity.
+    others_m = [np.array(o.pos) + np.array(o.vel) * (t_s - target.t) for o in target.others]
+    points_m = np.array([predicted_m] + others_m)
     pixels_px = project(pose, model, points_m)
     # The distance is recomputed for the predicted position and the present pose; it is
     # the same quantity as `distance_m`, which was valid at the target's time.

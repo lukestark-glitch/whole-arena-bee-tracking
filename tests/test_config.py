@@ -6,7 +6,7 @@ from typing import Any, Callable
 import pytest
 import yaml
 
-from shared.config import ConfigError, frame_rate_hz, load_config
+from shared.config import ConfigError, frame_rate_hz, load_config, load_robot
 
 DEFAULT_PATH = Path(__file__).parent.parent / "config" / "default.yaml"
 ARENA_CENTRE_M = (0.45, 0.15, 0.15)
@@ -153,3 +153,50 @@ def test_default_bees_and_frame_rate() -> None:
     assert config.bees.count == 10
     assert config.bees.max_speed_m_s == 5.0
     assert frame_rate_hz(config) == 60
+
+
+ROBOT_PATH = Path(__file__).parent.parent / "config" / "robot.yaml"
+
+
+def _robot_with(tmp_path: Path, change: Callable[[dict[str, Any]], None]) -> Path:
+    """Write a copy of the robot file with one change and return its path."""
+    raw = yaml.safe_load(ROBOT_PATH.read_text(encoding="utf-8"))
+    change(raw)
+    path = tmp_path / "robot.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return path
+
+
+def test_default_robot_values() -> None:
+    """The robot file loads with its limits, cameras and control settings."""
+    robot = load_robot(ROBOT_PATH)
+    assert robot.rail_start_m == (0.0, -0.15, 0.15)
+    assert (robot.rail.lower, robot.rail.upper) == (0.0, 0.9)
+    assert robot.tilt.lower == -robot.tilt.upper
+    assert robot.stereo.model.width_px == 1280 and robot.stereo.baseline_m == 0.05
+    assert robot.cinema.depth_of_field_m == 0.002
+    assert robot.control.rate_hz == 500.0 and robot.control.target_timeout_s == 0.5
+
+
+def test_robot_file_with_changed_limit_is_read(tmp_path: Path) -> None:
+    """A changed value in a robot file reaches the loaded robot."""
+    path = _robot_with(tmp_path, lambda raw: raw["rail"].update(max_speed_m_s=0.3))
+    assert load_robot(path).rail.max_speed == 0.3
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda raw: raw.pop("stereo"),
+        lambda raw: raw["tilt"].pop("max_rad"),
+        lambda raw: raw["tilt"].update(min_rad=1.0),
+        lambda raw: raw["focus"].update(max_speed_m_s=0.0),
+        lambda raw: raw["control"].update(rate_hz=0),
+        lambda raw: raw["rail"].update(start_m=[0.0, 1.0]),
+        lambda raw: raw["cinema"].update(aspect_ratio="wide"),
+    ],
+)
+def test_invalid_robot_file_is_refused(tmp_path: Path, change: Callable) -> None:
+    """A missing key, an empty range, a zero limit or a wrong type gives a ConfigError."""
+    with pytest.raises(ConfigError):
+        load_robot(_robot_with(tmp_path, change))

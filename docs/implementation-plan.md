@@ -10,7 +10,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 2 | Simulator window | done |
 | 3 | Tracking core | done |
 | 4 | Control window | done |
-| 5 | Robot | not started |
+| 5 | Robot | done |
 | 6 | Calibration | not started |
 | 7 | Experiments and other arena shapes | not started |
 | 8 | Optional: rendered camera images and a real detector | not planned yet |

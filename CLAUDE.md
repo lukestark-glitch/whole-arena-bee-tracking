@@ -37,7 +37,9 @@ If code and one of these files disagree, stop and fix the disagreement first.
 3. Create a branch `stage-<n>-<short-name>`. Make small commits with clear messages.
 4. When the acceptance criteria are met, complete the documentation checklist below, set the
    stage status in the plan to `done`, and open a pull request to `main`.
-5. If the plan is unclear or seems wrong, ask the user. Do not guess and do not silently
+5. When the pull request of a stage is open, send the user a push notification to their
+   phone (PushNotification tool): stage number, that it is done, and the pull request link.
+6. If the plan is unclear or seems wrong, ask the user. Do not guess and do not silently
    change the plan.
 
 ## Write only the code that is needed
