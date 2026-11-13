@@ -91,7 +91,7 @@ The software under test. Knows nothing about the simulator.
   30 times per second of simulation time, and accepts the selection from it.
 - Health: a node counts as stopped when none of its cameras has reported for
   `node_silent_after_s` of simulation time.
-- Restart: when frame numbers jump back by more than a second, the sender has restarted.
+- Restart: when frame numbers jump back by more than 10 frames, the sender has restarted.
   The tracker then drops all tracks and starts again; track IDs keep counting up.
 
 What the tracker does with one frame (Stage 3):
@@ -187,7 +187,7 @@ JSON text frames. The same port serves the page at `http://127.0.0.1:8766/`.
 Tracker → page, once after the connection opens:
 
 ```json
-{"type": "scene", "arena_size_m": [0.9, 0.3, 0.3], "prediction_lead_s": 0.1,
+{"type": "scene", "arena_size_m": [0.9, 0.3, 0.3], "prediction_lead_s": 0.1, "min_cameras": 3,
  "cameras": [{"id": "cam-01", "position_m": [0, 0, 0], "look_at_m": [0.45, 0.15, 0.15],
               "fov_horizontal_rad": 1.919862, "width_px": 1456, "height_px": 1088}],
  "nodes": [{"id": "node-01", "cameras": ["cam-01", "cam-02"]}]}
