@@ -6,7 +6,7 @@ the arena frame: right-handed, x along the long side, y away from the robot,
 z up, in metres.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +67,38 @@ class Noise:
 
 
 @dataclass(frozen=True)
+class Bees:
+    """Number of simulated bees and the parameters of their motion.
+
+    Attributes:
+        count: Number of bees in the arena.
+        body_length_m: Body length, sets the blob size in the images, in metres.
+        max_speed_m_s: Speed no bee exceeds, in m/s.
+        flight_speed_m_s: Typical (root mean square) flight speed, in m/s.
+        flight_direction_time_s: Time over which a flying bee keeps its direction, in s.
+        walk_speed_m_s: Speed of a walking bee, in m/s.
+        walk_turn_rad_per_sqrt_s: Random heading change of a walking bee, standard
+            deviation after one second, in rad.
+        landing_probability: Chance that a flying bee lands when it touches a wall.
+        takeoff_rate_hz: Rate at which a sitting or walking bee takes off, in 1/s.
+        sit_to_walk_rate_hz: Rate at which a sitting bee starts to walk, in 1/s.
+        walk_to_sit_rate_hz: Rate at which a walking bee stops, in 1/s.
+    """
+
+    count: int
+    body_length_m: float
+    max_speed_m_s: float
+    flight_speed_m_s: float
+    flight_direction_time_s: float
+    walk_speed_m_s: float
+    walk_turn_rad_per_sqrt_s: float
+    landing_probability: float
+    takeoff_rate_hz: float
+    sit_to_walk_rate_hz: float
+    walk_to_sit_rate_hz: float
+
+
+@dataclass(frozen=True)
 class Ports:
     """UDP port numbers for each message stream."""
 
@@ -86,6 +118,7 @@ class Config:
     cameras: tuple[Camera, ...]
     nodes: tuple[Node, ...]
     noise: Noise
+    bees: Bees
     ports: Ports
 
 
@@ -272,6 +305,39 @@ def _check_camera_membership(
             )
 
 
+def _check_frame_rate(cameras: tuple[Camera, ...], models: dict[str, CameraModel]) -> None:
+    """Require all cameras to run at the same frame rate.
+
+    One trigger source pulses every camera, so a second rate cannot exist.
+
+    Args:
+        cameras: All cameras.
+        models: Defined camera models by id.
+
+    Raises:
+        ConfigError: Naming the first camera whose rate differs.
+    """
+    rate_hz = models[cameras[0].model].rate_hz
+    for camera in cameras:
+        if models[camera.model].rate_hz != rate_hz:
+            raise ConfigError(
+                f"camera '{camera.id}' runs at {models[camera.model].rate_hz} Hz, "
+                f"but all cameras share one trigger at {rate_hz} Hz"
+            )
+
+
+def frame_rate_hz(config: Config) -> float:
+    """Return the common frame rate of all cameras.
+
+    Args:
+        config: A validated configuration.
+
+    Returns:
+        Trigger rate in Hz.
+    """
+    return config.camera_models[config.cameras[0].model].rate_hz
+
+
 def _validate(config: Config) -> None:
     """Run all consistency checks on a parsed configuration.
 
@@ -284,6 +350,7 @@ def _validate(config: Config) -> None:
     _check_unique_ids(config.cameras, "camera")
     _check_unique_ids(config.nodes, "node")
     _check_camera_models(config.cameras, config.camera_models)
+    _check_frame_rate(config.cameras, config.camera_models)
     _check_node_cameras(config.nodes, config.cameras)
     _check_camera_membership(config.nodes, config.cameras)
 
@@ -306,6 +373,23 @@ def _parse_noise(raw: Any) -> Noise:
         node_delay_s=float(_require(raw, "node_delay_s", "noise")),
         node_delay_jitter_s=float(_require(raw, "node_delay_jitter_s", "noise")),
     )
+
+
+def _parse_bees(raw: Any) -> Bees:
+    """Build Bees from the ``bees`` section.
+
+    Args:
+        raw: Parsed YAML mapping.
+
+    Returns:
+        The bee settings (metres, seconds, radians).
+
+    Raises:
+        ConfigError: If a key is missing.
+    """
+    names = [field.name for field in fields(Bees)]
+    values = {name: float(_require(raw, name, "bees")) for name in names}
+    return Bees(**{**values, "count": int(values["count"])})
 
 
 def _parse_ports(raw: Any) -> Ports:
@@ -349,6 +433,7 @@ def _parse(raw: Any) -> Config:
         cameras=tuple(_parse_camera(c) for c in _require(raw, "cameras", "top level")),
         nodes=tuple(_parse_node(n) for n in _require(raw, "nodes", "top level")),
         noise=_parse_noise(_require(raw, "noise", "top level")),
+        bees=_parse_bees(_require(raw, "bees", "top level")),
         ports=_parse_ports(_require(raw, "ports", "top level")),
     )
 

@@ -6,7 +6,7 @@ from typing import Any, Callable
 import pytest
 import yaml
 
-from shared.config import ConfigError, load_config
+from shared.config import ConfigError, frame_rate_hz, load_config
 
 DEFAULT_PATH = Path(__file__).parent.parent / "config" / "default.yaml"
 ARENA_CENTRE_M = (0.45, 0.15, 0.15)
@@ -134,3 +134,22 @@ def test_non_numeric_value(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="fast"):
         _load_broken(tmp_path, mutate)
+
+
+def test_cameras_with_different_frame_rates(tmp_path: Path) -> None:
+    """Two camera models with different rates cannot share the one trigger."""
+
+    def mutate(raw: dict[str, Any]) -> None:
+        raw["camera_models"]["slow"] = {**raw["camera_models"]["pi_gs_imx296"], "rate_hz": 30}
+        raw["cameras"][3]["model"] = "slow"
+
+    with pytest.raises(ConfigError, match="cam-04"):
+        _load_broken(tmp_path, mutate)
+
+
+def test_default_bees_and_frame_rate() -> None:
+    """The bees section loads and the common frame rate is 60 Hz."""
+    config = load_config(DEFAULT_PATH)
+    assert config.bees.count == 10
+    assert config.bees.max_speed_m_s == 5.0
+    assert frame_rate_hz(config) == 60
