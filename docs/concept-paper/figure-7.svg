@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 320" width="760" height="320" role="img" aria-label="The simulator stands in for bees, cameras and robot and exchanges the same network messages with the tracking and control software that real hardware would. Ground truth from the simulator and tracks from the software are compared to produce metrics.">
+<style>
+text{font-family:"Helvetica Neue",Arial,sans-serif}
+.ln{stroke:#18222b;stroke-width:1.4;fill:none}.ln-m{stroke:#5d6b76;stroke-width:1.2;fill:none}
+.ln-cam{stroke:#0f6f78;stroke-width:1.3;fill:none}.ln-bee{stroke:#b97700;stroke-width:2;fill:none}
+.dash{stroke-dasharray:5 4}
+.box{fill:#ffffff;stroke:#18222b;stroke-width:1.4}.box-p{fill:#f4f6f7;stroke:#18222b;stroke-width:1.4}
+.box-m{fill:#f4f6f7;stroke:#5d6b76;stroke-width:1.2}
+.f-ink{fill:#18222b}.f-m{fill:#5d6b76}.f-cam{fill:#0f6f78}.f-bee{fill:#b97700}.f-none{fill:none}
+.t{fill:#18222b;font-size:12.5px}.tb{fill:#18222b;font-size:13px;font-weight:600}
+.tm{fill:#5d6b76;font-size:12px}.tc{fill:#0f6f78;font-size:12px;font-weight:500}
+.ty{fill:#b97700;font-size:12.5px;font-weight:600}.mid{text-anchor:middle}.end{text-anchor:end}
+</style>
+<rect width="760" height="320" fill="#ffffff"/>
+
+<defs>
+<marker id="a7" markerHeight="8" markerWidth="9" orient="auto" refX="8" refY="4"><path class="f-ink" d="M0,0 L9,4 L0,8 z"></path></marker>
+<marker id="a7m" markerHeight="8" markerWidth="9" orient="auto" refX="8" refY="4"><path class="f-m" d="M0,0 L9,4 L0,8 z"></path></marker>
+</defs>
+<rect class="box" height="180" width="270" x="20" y="20"></rect>
+<text class="tb" x="36" y="44">Window 1: simulator</text>
+<text class="tm" x="36" y="62">stands in for the real world</text>
+<text class="t" x="36" y="88">· arena shape and virtual bumblebees</text>
+<text class="t" x="36" y="108">· virtual cameras with real resolution,</text>
+<text class="t" x="46" y="124">field of view, frame rate, noise</text>
+<text class="t" x="36" y="144">· robot model with speed and</text>
+<text class="t" x="46" y="160">acceleration limits</text>
+<text class="t" x="36" y="180">· cinema view with depth of field</text>
+<rect class="box" height="180" width="270" x="470" y="20"></rect>
+<text class="tb" x="486" y="44">Window 2: tracking and control</text>
+<text class="tm" x="486" y="62">the software under test</text>
+<text class="t" x="486" y="88">· triangulation and ghost rejection</text>
+<text class="t" x="486" y="108">· IDs, Kalman filter, prediction</text>
+<text class="t" x="486" y="128">· 3D view and bee selection</text>
+<text class="t" x="486" y="148">· live speed and acceleration</text>
+<text class="t" x="486" y="168">· camera feeds with overlays</text>
+<line class="ln" marker-end="url(#a7)" x1="290" x2="468" y1="80" y2="80"></line>
+<text class="t mid" x="380" y="72">detections per camera</text>
+<line class="ln" marker-end="url(#a7)" x1="470" x2="292" y1="140" y2="140"></line>
+<text class="t mid" x="380" y="132">target for the robot</text>
+<text class="tm mid" x="380" y="170">same messages as</text>
+<text class="tm mid" x="380" y="186">real hardware</text>
+<rect class="box-m" height="56" width="260" x="250" y="250"></rect>
+<text class="tb mid" x="380" y="273">Metrics</text>
+<text class="tm mid" x="380" y="292">ID swaps · time in frame · time in focus</text>
+<path class="ln-m" d="M155,200 V278 H248" marker-end="url(#a7m)"></path>
+<text class="tm" x="165" y="240">true positions and IDs</text>
+<path class="ln-m" d="M605,200 V278 H512" marker-end="url(#a7m)"></path>
+<text class="tm end" x="595" y="240">estimated tracks</text>
+
+</svg>

@@ -14,7 +14,8 @@ every bee at once. A tracking server computes each bee's 3D position and gives e
 stable ID. An operator selects one bee, and the robot is told where that bee is, where it
 will be a moment later, and how far away it is.
 
-The full concept is in [`docs/concept-paper.pdf`](docs/concept-paper.pdf).
+The full concept is in the [concept paper](docs/concept-paper.md), also available as
+[PDF](docs/concept-paper.pdf).
 
 ## Status
 
@@ -39,7 +40,7 @@ that real camera nodes and a real robot would use.
 
 | File | Content |
 | --- | --- |
-| [`docs/concept-paper.pdf`](docs/concept-paper.pdf) | The idea, the problems it targets, the system design |
+| [`docs/concept-paper.md`](docs/concept-paper.md) | The idea, the problems it targets, the system design ([PDF](docs/concept-paper.pdf)) |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Stages with tasks and acceptance criteria |
 | [`docs/architecture.md`](docs/architecture.md) | Components and how they communicate |
 | [`docs/protocol.md`](docs/protocol.md) | Every message and its fields |
