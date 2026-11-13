@@ -10,7 +10,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 2 | Simulator window | done |
 | 3 | Tracking core | done |
 | 4 | Control window | done |
-| 5 | Robot | not started |
+| 5 | Robot | done |
 | 6 | Calibration | not started |
 | 7 | Experiments and other arena shapes | not started |
 | 8 | Optional: rendered camera images and a real detector | not planned yet |
@@ -223,6 +223,11 @@ measured against the truth.
 - A test scenario in which a larger bee crosses the search window does not change the
   followed bee.
 - A 60 s run prints time in frame and time in focus. Record the numbers in `CHANGELOG.md`.
+
+**Stage 5 follow-ups**
+
+- The robot in the control window still uses the old simple model (boxes). Reuse the robot
+  model of the simulator window there (rail bars, carriage with yoke, camera body, lens).
 
 ---
 

@@ -66,10 +66,12 @@ class OtherBee:
     Attributes:
         track_id: Track identifier.
         pos: Position in the arena frame, in metres.
+        vel: Velocity in the arena frame, in m/s.
     """
 
     track_id: int
     pos: Vec3
+    vel: Vec3
 
 
 @dataclass(frozen=True)
@@ -85,7 +87,7 @@ class Target:
         distance_m: Distance from the robot camera to the bee, in metres.
         state: "sitting" or "flying".
         confidence: Track confidence, 0 to 1.
-        others: Other tracked bees, for collision avoidance.
+        others: Other tracked bees expected in the robot's view.
     """
 
     t: float
@@ -374,7 +376,11 @@ def encode_target(message: Target) -> bytes:
         "state": message.state,
         "confidence": round(message.confidence, CONFIDENCE_DECIMALS),
         "others": [
-            {"track_id": o.track_id, "pos": _vec(o.pos, METRE_DECIMALS)}
+            {
+                "track_id": o.track_id,
+                "pos": _vec(o.pos, METRE_DECIMALS),
+                "vel": _vec(o.vel, RATE_DECIMALS),
+            }
             for o in message.others
         ],
     }
@@ -457,7 +463,9 @@ def _decode_target(d: dict[str, Any]) -> Target:
         distance_m=d["distance_m"],
         state=d["state"],
         confidence=d["confidence"],
-        others=tuple(OtherBee(o["track_id"], _vec3(o["pos"])) for o in d["others"]),
+        others=tuple(
+            OtherBee(o["track_id"], _vec3(o["pos"]), _vec3(o["vel"])) for o in d["others"]
+        ),
     )
 
 

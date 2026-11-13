@@ -9,7 +9,7 @@
     --bg: #f3f4f6; --panel: #ffffffee; --text: #1f2933; --muted: #6b7280;
     --border: #d1d5db; --accent: #2563eb; --canvas: #e5e7eb; --row-sel: #dbeafe;
     --ok: #16a34a; --bad: #dc2626; --strip-bg: #f9fafbf2;
-    --panel-w: 300px; --strip-h: 190px;
+    --panel-w: 300px; --strip-h: 42vh;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -58,14 +58,22 @@
     display: flex; flex-direction: column; }
   #strip-head { flex: none; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
   #strip-head button { padding: 2px 8px; }
-  #strip-body { flex: 1; display: flex; gap: 8px; padding: 0 8px 8px; overflow-x: auto;
-    overflow-y: hidden; align-items: flex-start; }
+  #strip-body { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 0 8px 8px; }
+  #cinema-box { flex: none; position: relative; height: 100%; aspect-ratio: 16 / 9;
+    max-width: 55%; background: #000; border-radius: 4px; overflow: hidden; }
+  #cinema { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #cinema-note { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; text-align: center; padding: 8px; }
+  #cinema-note[hidden] { display: none; }
+  #cam-grid { flex: 1; min-width: 0; display: grid; gap: 8px; align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    overflow-x: hidden; overflow-y: auto; }
   body.strip-collapsed { --strip-h: 28px; }
   body.strip-collapsed #strip-body { display: none; }
-  .cam { flex: none; font-size: 11px; }
+  .cam { min-width: 0; font-size: 11px; }
   .cam-title { color: var(--muted); }
   .cam-box { position: relative; border: 2px solid var(--border); background: var(--canvas); }
-  .cam-box canvas { display: block; }
+  .cam-box canvas { display: block; width: 100%; height: auto; }
   .cam-box.silent { border-color: var(--bad); }
   .cam-box .nodata { display: none; position: absolute; inset: 0; align-items: center;
     justify-content: center; color: var(--bad); font-weight: 600; }
@@ -85,6 +93,8 @@
     <tr><td>Frame</td><td id="st-frame">-</td></tr>
     <tr><td>Tracks</td><td id="st-tracks">-</td></tr>
   </table>
+
+  <div style="margin-top:8px"><label><input type="checkbox" id="show-robot" checked> Show robot</label></div>
 
   <h2>Selected bee</h2>
   <table>
@@ -107,8 +117,14 @@
 
 <div id="strip">
   <div id="strip-head"><button id="strip-toggle">Cameras</button>
-    <span class="empty">detections of the latest message</span></div>
-  <div id="strip-body"></div>
+    <span class="empty">cinema view of the robot, and detections of the latest message</span></div>
+  <div id="strip-body">
+    <div id="cinema-box">
+      <img id="cinema" alt="cinema view of the robot">
+      <div class="empty" id="cinema-note">cinema view: needs an open simulator window</div>
+    </div>
+    <div id="cam-grid"></div>
+  </div>
 </div>
 
 <script type="importmap">
@@ -123,6 +139,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 // ---- constants ----
 const RECONNECT_DELAY_MS = 1000;
+let cinemaSocket = null;   // image stream of the cinema view, from the simulator
 const TRAIL_SECONDS = 2;               // simulation seconds of trail kept per track
 const TRACK_RADIUS_M = 0.008;          // display size, enlarged to be visible
 const PROBATION_SCALE = 0.6;
@@ -137,6 +154,10 @@ const GOLDEN_ANGLE_DEG = 137.508;      // spreads consecutive ids evenly around 
 const CAM_CANVAS_WIDTH_PX = 150;
 const MIN_DETECTION_RADIUS_PX = 2;
 const DEFAULT_ARENA_M = [0.9, 0.3, 0.3];
+const ROBOT_COLOR = 0x7c3aed;
+const RAIL_THICKNESS_M = 0.01;                  // display only
+const CARRIAGE_SIZE_M = [0.05, 0.03, 0.03];     // display only
+const LENS_SIZE_M = [0.03, 0.08, 0.03];         // display only, long side along the view axis
 
 // ---- helpers ----
 const $ = id => document.getElementById(id);
@@ -169,6 +190,12 @@ const cameraMarkerGeometry = new THREE.BoxGeometry(CAMERA_MARKER_SIZE_M, CAMERA_
   CAMERA_MARKER_SIZE_M);
 const cameraOkMaterial = new THREE.MeshBasicMaterial({ color: 0x10b981 });
 const cameraSilentMaterial = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
+
+const robotGroup = new THREE.Group();   // the robot as its own robot_pose reports it
+robotGroup.visible = false;
+scene.add(robotGroup);
+let robotInfo = null;           // robot geometry from the scene message
+let carriage = null, tiltHead = null, sightLine = null;
 
 const trackViews = new Map();   // track id -> display objects of that track
 let sceneInfo = { nodes: [], minCameras: 0 };   // from the scene message
@@ -492,7 +519,7 @@ function updateCameraMarkers() {
 // Build one small canvas per camera in scene order.
 function buildCameraPanels(cameras) {
   camPanels = new Map();
-  $("strip-body").replaceChildren(...cameras.map(cam => {
+  $("cam-grid").replaceChildren(...cameras.map(cam => {
     const wrap = document.createElement("div");
     wrap.className = "cam";
     const height = Math.round(CAM_CANVAS_WIDTH_PX * cam.height_px / cam.width_px);
@@ -541,6 +568,38 @@ function drawCameraPanels() {
   }
 }
 
+// Build the robot from the geometry of the robot file: rail along x, carriage, tilting head.
+function buildRobot(robot) {
+  clearGroup(robotGroup);
+  robotInfo = robot;
+  const material = new THREE.MeshStandardMaterial({ color: ROBOT_COLOR });
+  const rail = new THREE.Mesh(
+    new THREE.BoxGeometry(robot.rail_length_m, RAIL_THICKNESS_M, RAIL_THICKNESS_M), material);
+  rail.position.set(robot.rail_start_m[0] + robot.rail_length_m / 2, robot.rail_start_m[1],
+                    robot.rail_start_m[2] - CARRIAGE_SIZE_M[2]);
+  carriage = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(...CARRIAGE_SIZE_M), material);
+  base.position.z = -CARRIAGE_SIZE_M[2] / 2;
+  tiltHead = new THREE.Group();
+  sightLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]),
+    new THREE.LineBasicMaterial({ color: ROBOT_COLOR }));
+  tiltHead.add(new THREE.Mesh(new THREE.BoxGeometry(...LENS_SIZE_M), material), sightLine);
+  carriage.add(base, tiltHead);
+  robotGroup.add(rail, carriage);
+}
+
+// Place the robot as its last robot_pose says; hide it while no pose is known or the
+// checkbox is off. The sight line ends at the focus plane.
+function updateRobot(pose) {
+  robotGroup.visible = !!(pose && robotInfo && $("show-robot").checked);
+  if (!robotGroup.visible) return;
+  carriage.position.set(robotInfo.rail_start_m[0] + pose.rail_m, robotInfo.rail_start_m[1],
+                        robotInfo.rail_start_m[2]);
+  tiltHead.rotation.x = pose.tilt_rad;
+  sightLine.scale.y = robotInfo.lens_offset_m + pose.focus_m;
+}
+
 // ---- messages ----
 // Rebuild everything from a scene message.
 function handleScene(msg) {
@@ -556,6 +615,8 @@ function handleScene(msg) {
   buildNodeChips(msg.nodes);
   buildCameraPanels(msg.cameras);
   resetView(msg.arena_size_m);
+  if (msg.robot) buildRobot(msg.robot);
+  if (msg.cinema_port) connectCinema(msg.cinema_port);
 }
 
 // Show a tracks message everywhere.
@@ -568,10 +629,27 @@ function handleTracks(msg) {
   updateTrackList(msg);
   updateHealth(msg);
   updateCameraMarkers();
+  updateRobot(msg.robot);
   camerasDirty = true;
 }
 
 // Open the connection and reconnect after a close.
+// Show the robot's cinema view. It arrives like a video feed, as JPEG images over a
+// WebSocket of the simulator; the tracker itself never sees these images.
+function connectCinema(port) {
+  if (cinemaSocket) { cinemaSocket.onclose = null; cinemaSocket.close(); }
+  cinemaSocket = new WebSocket(`ws://${location.hostname}:${port}/cinema`);
+  cinemaSocket.onclose = () => setTimeout(() => connectCinema(port), RECONNECT_DELAY_MS);
+  cinemaSocket.onerror = () => cinemaSocket.close();
+  cinemaSocket.onmessage = event => {
+    const image = document.getElementById("cinema");
+    const old = image.src;
+    image.src = URL.createObjectURL(event.data);
+    if (old) URL.revokeObjectURL(old);
+    document.getElementById("cinema-note").hidden = true;
+  };
+}
+
 function connect() {
   socket = new WebSocket(`ws://${location.host}/`);
   socket.onopen = () => setStatus(true);
@@ -601,6 +679,7 @@ function applyBackground() {
 }
 
 $("clear").addEventListener("click", () => sendSelect(null));
+$("show-robot").addEventListener("change", () => updateRobot(lastTracks && lastTracks.robot));
 $("strip-toggle").addEventListener("click", () => {
   document.body.classList.toggle("strip-collapsed");
   resize();

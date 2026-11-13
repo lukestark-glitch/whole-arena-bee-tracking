@@ -15,12 +15,21 @@ from experiments.metrics import (
     Metrics,
     _collect_truth,
     compute_metrics,
+    compute_robot_metrics,
     format_metrics,
+    format_robot_metrics,
+    read_selection,
     read_track_log,
 )
-from shared.protocol import UDP_HOST, Truth, TruthBee, encode_truth
+from shared.config import load_robot
+from shared.protocol import UDP_HOST, RobotAxes, Truth, TruthBee, encode_truth
 
+ROBOT = load_robot(Path("config/robot.yaml"))
 FRAMES = 10
+# Camera at (0.45, -0.15, 0.15) looking along +y for rail 0.45 m, tilt 0; this bee is
+# centred at depth 0.25 m.
+CENTRED_BEE = (0.45, 0.10, 0.15)
+CENTRED_AXES = RobotAxes(rail_m=0.45, tilt_rad=0.0, focus_m=0.25)
 BEE_A = (0.0, 0.0, 0.0)
 BEE_B = (1.0, 0.0, 0.0)
 
@@ -159,8 +168,75 @@ def test_collect_truth_over_udp() -> None:
     bee = TruthBee(id=0, pos=(0.1, 0.1, 0.1), vel=(0.0, 0.0, 0.0), state="flying")
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
         for frame, t_s in enumerate((0.0, 0.5, 1.0)):  # frame 2 is after the last frame
-            for datagram in encode_truth(Truth(frame=frame, t=t_s, bees=(bee,))):
+            for datagram in encode_truth(Truth(frame=frame, t=t_s, bees=(bee,), robot=CENTRED_AXES)):
                 sender.sendto(datagram, (UDP_HOST, port))
     thread.join(timeout=5.0)
     assert not thread.is_alive()
-    assert result[0] == {0: {0: (0.1, 0.1, 0.1)}, 1: {0: (0.1, 0.1, 0.1)}}
+    positions, axes = result[0]
+    assert positions == {0: {0: (0.1, 0.1, 0.1)}, 1: {0: (0.1, 0.1, 0.1)}}
+    assert axes == {0: CENTRED_AXES, 1: CENTRED_AXES}
+
+
+def _robot_metrics(bee: tuple, axes: RobotAxes, track: tuple | None):
+    """Robot metrics over 4 frames with one bee and the selected track 7 at `track`."""
+    frames = range(4)
+    tracks = {f: ({7: track} if track is not None else {}) for f in frames}
+    return compute_robot_metrics(
+        {f: {0: bee} for f in frames}, {f: axes for f in frames}, tracks,
+        {f: 7 for f in frames}, ROBOT, MATCH_GATE_M,
+    )
+
+
+def test_robot_bee_centred_and_in_focus() -> None:
+    """A centred bee at the focus distance is in frame and in focus all the time."""
+    m = _robot_metrics(CENTRED_BEE, CENTRED_AXES, CENTRED_BEE)
+    assert m.frames == 4 and m.in_frame_share == 1.0 and m.in_focus_share == 1.0
+
+
+def test_robot_focus_off_by_one_centimetre() -> None:
+    """A focus distance off by 0.01 m keeps the bee in frame but out of focus."""
+    axes = RobotAxes(rail_m=0.45, tilt_rad=0.0, focus_m=0.26)
+    m = _robot_metrics(CENTRED_BEE, axes, CENTRED_BEE)
+    assert m.in_frame_share == 1.0 and m.in_focus_share == 0.0
+
+
+def test_robot_bee_to_the_side() -> None:
+    """A bee 0.05 m to the side is outside the frame and so out of focus too."""
+    bee = (0.50, 0.10, 0.15)
+    m = _robot_metrics(bee, CENTRED_AXES, bee)
+    assert m.in_frame_share == 0.0 and m.in_focus_share == 0.0
+
+
+def test_robot_selected_track_far_from_every_bee() -> None:
+    """A selected track matching no bee counts the frames but is neither in frame nor focus."""
+    m = _robot_metrics(CENTRED_BEE, CENTRED_AXES, (2.0, 2.0, 2.0))
+    assert m.frames == 4 and m.in_frame_share == 0.0 and m.in_focus_share == 0.0
+
+
+def test_robot_no_selection() -> None:
+    """Without a selection there are no frames and the shares are nan."""
+    m = compute_robot_metrics(
+        {0: {0: CENTRED_BEE}}, {0: CENTRED_AXES}, {0: {7: CENTRED_BEE}}, {}, ROBOT, MATCH_GATE_M
+    )
+    assert m.frames == 0 and math.isnan(m.in_frame_share) and math.isnan(m.in_focus_share)
+
+
+def test_read_selection(tmp_path: Path) -> None:
+    """Only lines with a non-null selected id are read; missing key means no selection."""
+    path = tmp_path / "tracks.jsonl"
+    lines = [
+        {"frame": 1, "t": 0.1, "selected": 4, "tracks": []},
+        {"frame": 2, "t": 0.2, "selected": None, "tracks": []},
+        {"frame": 3, "t": 0.3, "tracks": []},
+    ]
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+    assert read_selection(path) == {1: 4}
+
+
+def test_format_robot_metrics() -> None:
+    """The robot report shows the frame count and both shares in percent."""
+    text = format_robot_metrics(compute_robot_metrics(
+        {0: {0: CENTRED_BEE}}, {0: CENTRED_AXES}, {0: {7: CENTRED_BEE}}, {0: 7}, ROBOT,
+        MATCH_GATE_M,
+    ))
+    assert "frames with target: 1" in text and text.count("100.0 %") == 2

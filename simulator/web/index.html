@@ -88,6 +88,24 @@
     </div>
   </div>
 
+  <h2>Robot</h2>
+  <table>
+    <tr><td>Rail</td><td id="ro-rail">-</td></tr>
+    <tr><td>Tilt</td><td id="ro-tilt">-</td></tr>
+    <tr><td>Focus</td><td id="ro-focus">-</td></tr>
+    <tr><td>Target</td><td id="ro-target">-</td></tr>
+  </table>
+  <div class="row"><label for="rail_max_speed_m_s">Rail speed <span class="val" id="v-rail_max_speed_m_s"></span></label>
+    <input type="range" id="rail_max_speed_m_s" min="0.1" max="10" step="0.1"></div>
+  <div class="row"><label for="rail_max_acceleration_m_s2">Rail acceleration <span class="val" id="v-rail_max_acceleration_m_s2"></span></label>
+    <input type="range" id="rail_max_acceleration_m_s2" min="1" max="200" step="1"></div>
+  <div class="row"><label for="tilt_max_speed_rad_s">Tilt speed <span class="val" id="v-tilt_max_speed_rad_s"></span></label>
+    <input type="range" id="tilt_max_speed_rad_s" min="0.5" max="50" step="0.5"></div>
+  <div class="row"><label for="tilt_max_acceleration_rad_s2">Tilt acceleration <span class="val" id="v-tilt_max_acceleration_rad_s2"></span></label>
+    <input type="range" id="tilt_max_acceleration_rad_s2" min="10" max="2000" step="10"></div>
+  <div class="row">Cinema view</div>
+  <canvas id="cinema" width="250" height="141" style="width:100%;display:block"></canvas>
+
   <h2>Camera nodes</h2>
   <div class="row nodes" id="nodes"></div>
 
@@ -116,8 +134,29 @@ const CAMERA_COLOR = 0x10b981;
 const STOPPED_CAMERA_COLOR = 0xdc2626;
 const BEE_COLORS = { flying: 0xf97316, walking: 0x2563eb, sitting: 0x9ca3af };
 const DEFAULT_ARENA_M = [0.9, 0.3, 0.3];
+const ROBOT_LIMIT_NAMES = ["rail_max_speed_m_s", "rail_max_acceleration_m_s2",
+                           "tilt_max_speed_rad_s", "tilt_max_acceleration_rad_s2"];
 const CONTROL_NAMES = ["bee_count", "max_speed_m_s", "pixel_sigma_px",
-                       "dropout_probability", "time_scale"];
+                       "dropout_probability", "time_scale", ...ROBOT_LIMIT_NAMES];
+const ROBOT_COLOR = 0x7c3aed;
+// Sizes and colours of the robot model, display only. The real dimensions are not known;
+// only the rail position, the tilt axis and the focus distance come from the simulation.
+const RAIL_COLOR = 0x6b7280, BODY_COLOR = 0x1f2933, LENS_COLOR = 0x4b5563;
+const RAIL_THICKNESS_M = 0.008;
+const RAIL_GAUGE_M = 0.04;                     // distance between the two rail bars
+const CARRIAGE_SIZE_M = [0.08, 0.06, 0.01];    // plate on the rail
+const YOKE_HEIGHT_M = 0.04;                    // tilt axis above the plate
+const YOKE_THICKNESS_M = 0.006;
+const BODY_SIZE_M = [0.05, 0.05, 0.04];        // camera body, behind the tilt axis
+const LENS_RADIUS_M = 0.014;
+const LENS_LENGTH_M = 0.06;
+const HOOD_RADIUS_M = 0.018;
+const HOOD_LENGTH_M = 0.015;
+const CINEMA_SEND_INTERVAL_MS = 66;    // about 15 images per second to the control window
+const CINEMA_JPEG_QUALITY = 0.7;
+const CINEMA_BACKGROUND = "#dfe7d8";
+const CINEMA_BEE_COLOR = "40, 30, 10";  // r, g, b
+const CINEMA_MAX_BLUR_PX = 60;
 
 // ---- scene setup ----
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);   // arena frame: z is up
@@ -133,6 +172,12 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(0.5, -1, 2);
 scene.add(sun);
+
+const robotGroup = new THREE.Group();   // rail, carriage and tilting camera
+scene.add(robotGroup);
+let robotInfo = null;          // robot geometry from the scene message
+let bodyLengthM = 0.015;       // bee body length from the scene message
+let carriage = null, tiltHead = null, sightLine = null;
 
 const beeMeshes = new Map();   // bee id -> mesh
 const beeGeometry = new THREE.SphereGeometry(BEE_RADIUS_M, 12, 8);
@@ -210,9 +255,136 @@ function buildCamera(cam) {
   cameraGroup.add(group);
 }
 
+// Add a box of the given size (x, y, z in m) and centre to a parent and return it.
+function addBox(parent, size, centre, color) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size),
+    new THREE.MeshStandardMaterial({ color }));
+  mesh.position.set(...centre);
+  parent.add(mesh);
+  return mesh;
+}
+
+// Add a cylinder along y (the view axis of the head) from y0 to y1 to a parent.
+function addBarrel(parent, radius, y0, y1, color) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, y1 - y0, 24),
+    new THREE.MeshStandardMaterial({ color }));
+  mesh.position.y = (y0 + y1) / 2;
+  parent.add(mesh);
+}
+
+// Build the rail: two bars along x with a block at each end, below the tilt axis.
+function buildRail(robot) {
+  const [x0, y, z] = robot.rail_start_m, length = robot.rail_length_m + CARRIAGE_SIZE_M[0];
+  const railZ = z - YOKE_HEIGHT_M - CARRIAGE_SIZE_M[2] - RAIL_THICKNESS_M / 2;
+  for (const side of [-1, 1]) {
+    addBox(robotGroup, [length, RAIL_THICKNESS_M, RAIL_THICKNESS_M],
+           [x0 + robot.rail_length_m / 2, y + side * RAIL_GAUGE_M / 2, railZ], RAIL_COLOR);
+    addBox(robotGroup, [RAIL_THICKNESS_M, RAIL_GAUGE_M + 2 * RAIL_THICKNESS_M, 2 * RAIL_THICKNESS_M],
+           [x0 + robot.rail_length_m / 2 + side * length / 2, y, railZ], RAIL_COLOR);
+  }
+}
+
+// Build the carriage: a plate on the rail and a yoke of two uprights that carry the tilt axis.
+// The carriage origin is on the tilt axis.
+function buildCarriage() {
+  carriage = new THREE.Group();
+  addBox(carriage, CARRIAGE_SIZE_M, [0, 0, -YOKE_HEIGHT_M - CARRIAGE_SIZE_M[2] / 2], ROBOT_COLOR);
+  for (const side of [-1, 1]) {
+    addBox(carriage, [YOKE_THICKNESS_M, 2 * YOKE_THICKNESS_M, YOKE_HEIGHT_M + YOKE_THICKNESS_M],
+           [side * (BODY_SIZE_M[0] + YOKE_THICKNESS_M) / 2, 0, -YOKE_HEIGHT_M / 2], ROBOT_COLOR);
+  }
+  robotGroup.add(carriage);
+}
+
+// Build the head that tilts about x: camera body behind the axis, lens with hood pointing
+// along +y into the arena, and a line from the lens reference point to the focus plane.
+function buildHead(robot) {
+  tiltHead = new THREE.Group();
+  addBox(tiltHead, BODY_SIZE_M, [0, -BODY_SIZE_M[1] / 2, 0], BODY_COLOR);
+  addBarrel(tiltHead, LENS_RADIUS_M, 0, LENS_LENGTH_M, LENS_COLOR);
+  addBarrel(tiltHead, HOOD_RADIUS_M, LENS_LENGTH_M, LENS_LENGTH_M + HOOD_LENGTH_M, BODY_COLOR);
+  sightLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]),
+    new THREE.LineBasicMaterial({ color: ROBOT_COLOR }));
+  sightLine.position.y = robot.lens_offset_m;
+  tiltHead.add(sightLine);
+  carriage.add(tiltHead);
+}
+
+// Build the robot from simple shapes: rail, carriage and tilting camera head.
+function buildRobot(robot) {
+  clearGroup(robotGroup);
+  buildRail(robot);
+  buildCarriage();
+  buildHead(robot);
+}
+
+// Move the robot model: carriage along the rail, head about the x axis, sight line to the
+// focus plane.
+function updateRobot(robot) {
+  if (!robotInfo || !carriage || !robot) return;
+  carriage.position.set(robotInfo.rail_start_m[0] + robot.rail_m, robotInfo.rail_start_m[1],
+                        robotInfo.rail_start_m[2]);
+  tiltHead.rotation.x = robot.tilt_rad;
+  sightLine.scale.y = robot.focus_m;
+  $("ro-rail").textContent = `${robot.rail_m.toFixed(3)} m`;
+  $("ro-tilt").textContent = `${(robot.tilt_rad * 180 / Math.PI).toFixed(1)}°`;
+  $("ro-focus").textContent = `${robot.focus_m.toFixed(3)} m`;
+  $("ro-target").textContent = robot.has_target ? "following" : "none";
+}
+
+// Draw what the cinema camera sees: every bee in its narrow view as a dark disc whose edge
+// gets softer the farther the bee is from the focus plane.
+function drawCinema(msg) {
+  const view = $("cinema"), ctx = view.getContext("2d");
+  ctx.fillStyle = CINEMA_BACKGROUND;
+  ctx.fillRect(0, 0, view.width, view.height);
+  if (!robotInfo || !msg.robot) return;
+  const cos = Math.cos(msg.robot.tilt_rad), sin = Math.sin(msg.robot.tilt_rad);
+  const start = robotInfo.rail_start_m, offset = robotInfo.lens_offset_m;
+  const lens = [start[0] + msg.robot.rail_m, start[1] + offset * cos, start[2] + offset * sin];
+  // Pinhole: half the image width covers tan(fov / 2) times the depth.
+  const halfWidth = Math.tan(robotInfo.cinema_fov_horizontal_rad / 2);
+  for (const bee of msg.bees) {
+    const d = [bee.pos[0] - lens[0], bee.pos[1] - lens[1], bee.pos[2] - lens[2]];
+    const depth = d[1] * cos + d[2] * sin;      // along the optical axis
+    const up = -d[1] * sin + d[2] * cos;        // image up
+    if (depth <= 0) continue;
+    const pxPerM = view.width / 2 / (depth * halfWidth);
+    const u = view.width / 2 + d[0] * pxPerM, v = view.height / 2 - up * pxPerM;
+    const radius = bodyLengthM / 2 * pxPerM;
+    // Blur grows with the distance from the focus plane, in units of the depth of field.
+    const blur = Math.min(CINEMA_MAX_BLUR_PX,
+      radius * Math.abs(depth - msg.robot.focus_m) / robotInfo.depth_of_field_m);
+    const gradient = ctx.createRadialGradient(u, v, Math.max(0, radius - blur), u, v, radius + blur);
+    gradient.addColorStop(0, `rgba(${CINEMA_BEE_COLOR}, ${radius / (radius + blur)})`);
+    gradient.addColorStop(1, `rgba(${CINEMA_BEE_COLOR}, 0)`);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(u, v, radius + blur, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
+// Send the cinema view to the server as a JPEG image; the server passes it on to the
+// control window like a video feed.
+function sendCinema() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  $("cinema").toBlob(blob => {
+    if (blob && socket.readyState === WebSocket.OPEN) socket.send(blob);
+  }, "image/jpeg", CINEMA_JPEG_QUALITY);
+}
+
 // Rebuild arena and cameras from a scene message.
 function handleScene(msg) {
   arenaSize = msg.arena_size_m;
+  if (msg.robot) {
+    robotInfo = msg.robot;
+    bodyLengthM = msg.body_length_m;
+    buildRobot(robotInfo);
+    const view = $("cinema");
+    view.height = Math.round(view.width / robotInfo.cinema_aspect_ratio);
+  }
   buildArena(arenaSize);
   clearGroup(cameraGroup);
   msg.cameras.forEach(buildCamera);
@@ -282,6 +454,10 @@ function formatValue(name, v) {
     case "pixel_sigma_px": return `${v.toFixed(1)} px`;
     case "dropout_probability": return `${(v * 100).toFixed(0)} %`;
     case "time_scale": return `${v.toFixed(1)}x`;
+    case "rail_max_speed_m_s": return `${v.toFixed(1)} m/s`;
+    case "rail_max_acceleration_m_s2": return `${v.toFixed(0)} m/s²`;
+    case "tilt_max_speed_rad_s": return `${v.toFixed(1)} rad/s`;
+    case "tilt_max_acceleration_rad_s2": return `${v.toFixed(0)} rad/s²`;
     default: return String(v);
   }
 }
@@ -340,7 +516,10 @@ function connect() {
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg.type === "scene") handleScene(msg);
-    else if (msg.type === "state") { lastState = msg; updatePanel(msg); updateBees(msg.bees); }
+    else if (msg.type === "state") {
+      lastState = msg; updatePanel(msg); updateBees(msg.bees);
+      updateRobot(msg.robot); drawCinema(msg);
+    }
   };
 }
 
@@ -364,6 +543,7 @@ function wireControls() {
   wireSlider("pixel_sigma_px", parseFloat);
   wireSlider("dropout_probability", parseFloat);
   wireSlider("time_scale", parseFloat);
+  ROBOT_LIMIT_NAMES.forEach(name => wireSlider(name, parseFloat));
 
   $("bee_count").addEventListener("input", () => { $("bee_count_num").value = $("bee_count").value; });
   $("bee_count_num").addEventListener("input", () => {
@@ -406,6 +586,7 @@ handleScene({ arena_size_m: DEFAULT_ARENA_M, cameras: [] });
 wireControls();
 resize();
 connect();
+setInterval(sendCinema, CINEMA_SEND_INTERVAL_MS);
 animate();
 </script>
 </body>

@@ -3,6 +3,42 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-14: Stage 5, robot
+
+- `config/robot.yaml`: every robot value with unit and source; `--robot PATH` selects
+  another file (simulator, tracker, metrics).
+- `robot_emulator/`: axes with speed and acceleration limits, stereo camera with noise,
+  controller with the selection rule, fallback to the prediction, feed-forward and focus
+  preset. It runs inside the simulator and speaks `target` and `robot_pose`.
+- Tracker: sends `target` for the selected track, reads `robot_pose`, option
+  `--auto-select`, field `selected` in the track log.
+- Protocol: entries of `others` in `target` also carry `vel`.
+- Simulator window: robot model, cinema view, sliders for the limits of rail and tilt.
+  Control window: cinema view as an image stream.
+- Metrics: time in frame and time in focus of the selected bee.
+- `CLAUDE.md`: a push notification is sent when a stage's pull request is open.
+- Decisions D47 to D59.
+
+**Robot result** (60 s, 10 bees, seed 1, default configuration and `config/robot.yaml`,
+tracker with `--auto-select`; cinema picture 24 mm wide, depth of field 2 mm; both were
+doubled in `config/robot.yaml` afterwards for viewing, the numbers below are not re-measured):
+
+| Run | Time in frame | Time in focus |
+| --- | --- | --- |
+| Three programs in real time, run 1 | 36.3 % | 19.0 % |
+| Three programs in real time, run 2 | 55.1 % | 23.9 % |
+| One process (`tests/test_robot_loop.py` set-up), `target` one frame late | 80.3 % | 34.4 % |
+| Same, two frames late | 70.6 % | 32.5 % |
+| Same, three frames late | 60.3 % | 31.0 % |
+
+Tracking itself is unchanged (0.44 mm mean error, 3600 frames).
+
+Reading: the result depends strongly on how old `target` is when the robot uses it, about
+10 points of time in frame per frame of delay. The real-time runs differ from each other
+because that delay depends on how busy the computer is (both were measured on a loaded
+machine). The one-process numbers repeat exactly. Nearly all robot values are still
+assumptions, so the numbers show the mechanism, not the real robot.
+
 ## 2026-11-13: Stage 4, control window
 
 - Control window at <http://127.0.0.1:8766/>: tracks with ID, trail and predicted position,

@@ -15,8 +15,8 @@ import pytest
 from websockets.asyncio.client import ClientConnection, connect
 
 import tracker.main as main
-from shared.config import Config, frame_rate_hz, last_frame_of, load_config
-from shared.protocol import Detections, decode, encode_detections
+from shared.config import Config, frame_rate_hz, last_frame_of, load_config, load_robot
+from shared.protocol import Detections, RobotPose, decode, encode_detections
 from simulator.main import create_simulation, step_simulation
 from tracker.main import (
     Tracker,
@@ -29,6 +29,7 @@ from tracker.main import (
 from tracker.receiver import Frame, FrameAssembler
 
 CONFIG = load_config(Path(__file__).parent.parent / "config" / "default.yaml")
+ROBOT = load_robot(Path(__file__).parent.parent / "config" / "robot.yaml")
 HOST = "127.0.0.1"
 TIMEOUT_S = 10.0  # generous, so a busy computer does not fail the test
 CONNECT_ATTEMPTS = 100
@@ -45,12 +46,12 @@ def _feed(frames: int, silent_cameras: frozenset[str] = frozenset()) -> tuple[Tr
     Returns:
         The tracker, the last processed frame and the assembler's last report times.
     """
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     period_s = 1.0 / frame_rate_hz(CONFIG)
     assembler = FrameAssembler(
         [camera.id for camera in CONFIG.cameras], CONFIG.tracker.frame_timeout_frames * period_s
     )
-    tracker = create_tracker(CONFIG)
+    tracker = create_tracker(CONFIG, ROBOT)
     last = None
     for _ in range(frames):
         for item in step_simulation(simulation):
@@ -67,7 +68,12 @@ def _feed(frames: int, silent_cameras: frozenset[str] = frozenset()) -> tuple[Tr
 
 def test_scene_message() -> None:
     """The scene lists the cameras with image size and the nodes with their cameras."""
-    message = json.loads(scene_message(CONFIG))
+    message = json.loads(scene_message(CONFIG, ROBOT))
+    assert message["robot"] == {
+        "rail_start_m": list(ROBOT.rail_start_m),
+        "rail_length_m": ROBOT.rail.upper,
+        "lens_offset_m": ROBOT.lens_offset_m,
+    }
     assert message["type"] == "scene" and message["arena_size_m"] == list(CONFIG.arena.size_m)
     assert message["prediction_lead_s"] == CONFIG.tracker.prediction_lead_s
     assert len(message["cameras"]) == 16 and len(message["nodes"]) == 8
@@ -94,6 +100,10 @@ def test_tracks_message() -> None:
     assert message["health"]["silent_nodes"] == []
     assert len(message["health"]["camera_age_s"]) == 16
     assert message["selected"] is None
+    assert message["robot"] is None
+    tracker.robot_pose = RobotPose(t=1.0, rail_m=0.3, tilt_rad=0.1, focus_m=0.25)
+    message = json.loads(tracks_message(tracker, frame, CONFIG, last_report_s))
+    assert message["robot"] == {"rail_m": 0.3, "tilt_rad": 0.1, "focus_m": 0.25}
 
 
 def test_silent_node_is_reported() -> None:
@@ -167,10 +177,12 @@ def _running(tmp_path: Path) -> Iterator[Config]:
         CONFIG.ports,
         detections=_free_port(socket.SOCK_DGRAM),
         control_window=_free_port(socket.SOCK_STREAM),
+        robot_pose=_free_port(socket.SOCK_DGRAM),
     )
     config = dataclasses.replace(CONFIG, ports=ports)
     thread = threading.Thread(
-        target=main.run, args=(config, tmp_path / "tracks.jsonl", RUN_DURATION_S), daemon=True
+        target=main.run, args=(config, ROBOT, tmp_path / "tracks.jsonl", RUN_DURATION_S, False),
+        daemon=True,
     )
     thread.start()
     try:
@@ -203,7 +215,7 @@ async def _next_tracks(ws: ClientConnection) -> dict:
 
 async def _send_frames(config: Config, frames: int) -> None:
     """Send simulated detections datagrams to the tracker, yielding between frames."""
-    simulation = create_simulation(config, 1, 1.0)
+    simulation = create_simulation(config, ROBOT, 1, 1.0)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         for _ in range(frames):
             for item in step_simulation(simulation):
@@ -291,4 +303,4 @@ def test_camera_age_is_never_negative() -> None:
 
 def test_scene_carries_the_camera_minimum() -> None:
     """The page gets the warning threshold from the tracker settings, not a copy."""
-    assert json.loads(scene_message(CONFIG))["min_cameras"] == CONFIG.tracker.min_cameras
+    assert json.loads(scene_message(CONFIG, ROBOT))["min_cameras"] == CONFIG.tracker.min_cameras

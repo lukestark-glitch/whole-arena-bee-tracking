@@ -28,7 +28,7 @@ DETECTIONS = Detections(
 )
 TARGET = Target(
     17.383333, 4, (0.4120, 0.1503, 0.1711), (0.80, -0.12, 0.05), (0.0, 0.0, 0.0),
-    0.2140, "flying", 0.93, (OtherBee(7, (0.4301, 0.1100, 0.1650)),),
+    0.2140, "flying", 0.93, (OtherBee(7, (0.4301, 0.1100, 0.1650), (-0.2, 0.0, 0.1)),),
 )
 POSE = RobotPose(17.38, 0.3920, 0.1100, 0.2150)
 TRUTH = Truth(
@@ -139,7 +139,7 @@ def test_truth_split() -> None:
 
 def test_oversized_target_raises() -> None:
     """A target that does not fit in one datagram is an error, never split."""
-    others = tuple(OtherBee(i, (0.1, 0.2, 0.3)) for i in range(3000))
+    others = tuple(OtherBee(i, (0.1, 0.2, 0.3), (0.0, 0.0, 0.0)) for i in range(3000))
     big = Target(0.0, 1, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.1, "flying", 0.9, others)
     with pytest.raises(ProtocolError):
         encode_target(big)
@@ -193,3 +193,14 @@ def test_split_parts_are_filled() -> None:
     for part, following in zip(decoded, decoded[1:]):
         longer = Detections("node-01", "cam-01", 7, 0.5, part.bees + following.bees[:1])
         assert len(encode_detections(longer)) == 2
+
+
+def test_target_with_the_most_others_fits_one_datagram() -> None:
+    """Eight other bees with long numbers still fit below the datagram limit."""
+    others = tuple(
+        OtherBee(1000 + i, (-0.1234, -0.1234, -0.1234), (-12.3456, -12.3456, -12.3456))
+        for i in range(8)
+    )
+    vec = (-12.3456, -12.3456, -12.3456)
+    target = Target(3599.123456, 1000, vec, vec, vec, 0.1234, "flying", 0.93, others)
+    assert len(encode_target(target)) < 1400
