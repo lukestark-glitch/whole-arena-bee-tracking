@@ -134,10 +134,10 @@ tracker:
   min_cameras_tracked: 2            # cameras that must agree on the point of a known track
   coverage_share: 0.5               # share of the cameras covering a place that must agree
   arena_margin_m: 0.01              # a new point may lie this far outside the arena
-  assignment_gate_m: 0.05           # largest distance between a prediction and a new point
+  assignment_gate_m: 0.1            # largest distance between a prediction and a new point
   confirm_frames: 5                 # frames in a row before a track gets confirmed
   max_missed_frames: 15             # frames without support before a track is removed
-  jerk_sigma_m_s3: 300.0            # filter process noise
+  jerk_sigma_m_s3: 1000.0           # filter process noise
   measurement_sigma_m: 0.002        # noise of a triangulated point per axis
   initial_speed_sigma_m_s: 2.0      # velocity uncertainty of a new track
   initial_acceleration_sigma_m_s2: 20.0
