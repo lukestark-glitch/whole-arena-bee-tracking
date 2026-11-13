@@ -35,9 +35,11 @@ lens:
 
 # Cinema camera (180 mm macro at 1.5x magnification; video).
 cinema:
-  fov_horizontal_rad: 0.096         # rad; assumed (24 mm wide field seen from 0.25 m)
+  fov_horizontal_rad: 0.19          # rad; assumed, widened for viewing (48 mm wide field
+                                    # seen from 0.25 m; the lens would give about 24 mm)
   aspect_ratio: 1.7778              # width / height; assumed (16:9)
-  depth_of_field_m: 0.002           # m, total depth that counts as sharp; assumed
+  depth_of_field_m: 0.004           # m, total depth that counts as sharp; assumed, widened
+                                    # for viewing (first guess was 0.002)
 
 # Stereo camera pair on the robot, treated as one rectified image with a measured
 # distance per blob.

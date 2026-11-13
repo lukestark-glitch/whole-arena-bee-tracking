@@ -184,8 +184,8 @@ Simulator → page, once after the connection opens:
  "nodes": [{"id": "node-01", "cameras": ["cam-01", "cam-02"]}],
  "body_length_m": 0.015,
  "robot": {"rail_start_m": [0.0, -0.15, 0.15], "rail_length_m": 0.9, "lens_offset_m": 0.0,
-           "cinema_fov_horizontal_rad": 0.096, "cinema_aspect_ratio": 1.7778,
-           "depth_of_field_m": 0.002}}
+           "cinema_fov_horizontal_rad": 0.19, "cinema_aspect_ratio": 1.7778,
+           "depth_of_field_m": 0.004}}
 ```
 
 Simulator → page, at most 30 times per second of wall time (also while paused):

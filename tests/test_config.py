@@ -174,7 +174,7 @@ def test_default_robot_values() -> None:
     assert (robot.rail.lower, robot.rail.upper) == (0.0, 0.9)
     assert robot.tilt.lower == -robot.tilt.upper
     assert robot.stereo.model.width_px == 1280 and robot.stereo.baseline_m == 0.05
-    assert robot.cinema.depth_of_field_m == 0.002
+    assert robot.cinema.depth_of_field_m == 0.004
     assert robot.control.rate_hz == 500.0 and robot.control.target_timeout_s == 0.5
 
 
