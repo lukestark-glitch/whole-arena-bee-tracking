@@ -118,6 +118,37 @@ def test_scene_message() -> None:
     assert set(first) == {"id", "position_m", "look_at_m", "fov_horizontal_rad"}
 
 
+def test_scene_message_lists_nodes() -> None:
+    """The scene lists the 8 nodes with two cameras each, in config order."""
+    nodes = json.loads(scene_message(CONFIG))["nodes"]
+    assert len(nodes) == 8 and all(len(n["cameras"]) == 2 for n in nodes)
+    assert [n["id"] for n in nodes] == [n.id for n in CONFIG.nodes]
+    assert nodes[0] == {"id": "node-01", "cameras": ["cam-01", "cam-02"]}
+
+
+def test_state_message_lists_stopped_nodes() -> None:
+    """The state lists the stopped nodes, sorted."""
+    simulation = create_simulation(CONFIG, 3, 1.0)
+    assert json.loads(state_message(simulation))["stopped_nodes"] == []
+    for node_id in ("node-05", "node-03"):
+        main.apply_control(simulation, "node_stopped", {"node_id": node_id, "stopped": True})
+    assert json.loads(state_message(simulation))["stopped_nodes"] == ["node-03", "node-05"]
+
+
+def test_node_stopped_over_websocket() -> None:
+    """A node_stopped control shows up in a later state message."""
+
+    async def session(port: int) -> None:
+        async with await _connect(port) as ws:
+            await ws.send(_control("node_stopped", {"node_id": "node-03", "stopped": True}))
+            state = await _next_state(ws)
+            while "node-03" not in state["stopped_nodes"]:
+                state = await _next_state(ws)
+
+    with _running() as port:
+        asyncio.run(session(port))
+
+
 def test_state_message() -> None:
     """The state holds frame, time, settings and one entry per bee."""
     simulation = create_simulation(CONFIG, 3, 2.0)

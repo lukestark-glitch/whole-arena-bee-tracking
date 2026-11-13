@@ -3,8 +3,8 @@
 How the parts fit together and how they talk to each other. Update this file whenever a
 component or a channel changes. Message fields are defined in `docs/protocol.md`.
 
-Status: `shared/`, the simulator with its window, the tracker without its window and the
-metrics are built (Stages 0 to 3).
+Status: `shared/`, the simulator and the tracker with their windows and the metrics are
+built (Stages 0 to 4).
 Everything else is design. Each section notes the stage that builds it.
 
 ## Overview
@@ -41,6 +41,7 @@ the tracker.
 Code both programs need, and nothing else.
 
 - `config.py`: loads and validates `config/*.yaml` into dataclasses.
+- `web.py`: serves a window's page on the port of its WebSocket.
 - `protocol.py`: builds and parses the messages of `docs/protocol.md`.
 - `geometry.py`: camera model. Projects a 3D point to a pixel and turns a pixel into a ray.
   The simulator uses projection, the tracker uses rays, so both share one implementation of
@@ -57,7 +58,7 @@ Owns simulation time and the ground truth.
   Stage 6.
 - Camera nodes: group two cameras per node, add the node's processing delay (one random
   delay per node and frame, shared by both cameras), and send one `detections` message per
-  camera and frame. Node failure is not built yet.
+  camera and frame. A node stopped from the simulator window sends nothing for both cameras.
 - Sends `truth` once per frame.
 - Serves the simulator window (page and WebSocket on one port) and accepts control changes
   from it (bee count, speed, noise, dropouts, pause, time scale, seed). Changes are applied
@@ -86,7 +87,12 @@ The software under test. Knows nothing about the simulator.
 - Tracks: one Kalman filter per bee, assignment of points to tracks, track creation after a
   probation time, track removal after a time without support.
 - Output: `target` for the selected track, a log of all tracks for the metrics.
-- Serves the control window and accepts the selection from it.
+- Serves the control window (page and WebSocket on one port), sends it a snapshot at most
+  30 times per second of simulation time, and accepts the selection from it.
+- Health: a node counts as stopped when none of its cameras has reported for
+  `node_silent_after_s` of simulation time.
+- Restart: when frame numbers jump back by more than 10 frames, the sender has restarted.
+  The tracker then drops all tracks and starts again; track IDs keep counting up.
 
 What the tracker does with one frame (Stage 3):
 
@@ -140,7 +146,8 @@ Simulator → page, once after the connection opens:
 ```json
 {"type": "scene", "arena_size_m": [0.9, 0.3, 0.3],
  "cameras": [{"id": "cam-01", "position_m": [0, 0, 0], "look_at_m": [0.45, 0.15, 0.15],
-              "fov_horizontal_rad": 1.919862}]}
+              "fov_horizontal_rad": 1.919862}],
+ "nodes": [{"id": "node-01", "cameras": ["cam-01", "cam-02"]}]}
 ```
 
 Simulator → page, at most 30 times per second of wall time (also while paused):
@@ -150,6 +157,7 @@ Simulator → page, at most 30 times per second of wall time (also while paused)
  "time_scale": 1.0,
  "settings": {"bee_count": 10, "max_speed_m_s": 5.0, "pixel_sigma_px": 0.5,
               "dropout_probability": 0.02},
+ "stopped_nodes": ["node-03"],
  "bees": [{"id": 0, "pos": [0.41, 0.15, 0.17], "state": "flying"}]}
 ```
 
@@ -168,8 +176,52 @@ Page → simulator, one message per change:
 | `paused` | bool | Simulation time stops, no UDP messages are sent |
 | `time_scale` | float, 0.01 to 100 | Simulation seconds per second of wall time |
 | `seed` | int | Restart at frame 0 with this seed and the current settings |
+| `node_stopped` | `{"node_id": "node-03", "stopped": true}` | A stopped node sends nothing for both of its cameras; `false` starts it again |
 
 A change takes effect at the start of the next frame. An invalid message is ignored.
+
+### Messages of the control window (WebSocket, port 8766)
+
+JSON text frames. The same port serves the page at `http://127.0.0.1:8766/`.
+
+Tracker → page, once after the connection opens:
+
+```json
+{"type": "scene", "arena_size_m": [0.9, 0.3, 0.3], "prediction_lead_s": 0.1, "min_cameras": 3,
+ "cameras": [{"id": "cam-01", "position_m": [0, 0, 0], "look_at_m": [0.45, 0.15, 0.15],
+              "fov_horizontal_rad": 1.919862, "width_px": 1456, "height_px": 1088}],
+ "nodes": [{"id": "node-01", "cameras": ["cam-01", "cam-02"]}]}
+```
+
+Tracker → page, at most 30 times per second of simulation time:
+
+```json
+{"type": "tracks", "frame": 1042, "t": 17.366667, "selected": 4,
+ "tracks": [{"id": 4, "pos": [0.412, 0.1503, 0.1711], "vel": [0.8, -0.12, 0.05],
+             "acc": [1.2, 0.0, -0.4], "pred": [0.492, 0.1383, 0.1761],
+             "state": "flying", "confirmed": true, "cameras": 7}],
+ "detections": {"cam-01": [[512.31, 300.87, 14.2, 4], [901.05, 644.4, 9.8, -1]]},
+ "health": {"silent_nodes": ["node-03"], "camera_age_s": {"cam-01": 0.0}}}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `selected` | ID of the selected track, or `null` |
+| `tracks[].acc` | Smoothed acceleration (time constant `acceleration_smoothing_s`) |
+| `tracks[].pred` | Position predicted `prediction_lead_s` ahead of `t` |
+| `tracks[].cameras` | Cameras behind the track's point in this frame, 0 on prediction alone |
+| `detections` | Per camera: `[u, v, size, track_id]`; `track_id` is -1 for a detection no track used |
+| `health.silent_nodes` | Nodes whose cameras have all been silent for `node_silent_after_s` |
+| `health.camera_age_s` | Simulation time since each camera last reported |
+
+Page → tracker:
+
+```json
+{"type": "select", "track_id": 4}
+```
+
+`track_id` is a track ID or `null` to clear the selection. The selection is cleared by the
+tracker when the track is removed. An invalid message is ignored.
 
 ## Timing
 

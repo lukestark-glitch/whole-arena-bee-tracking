@@ -38,6 +38,8 @@
   .legend span { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; }
   .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .nodes button { margin: 0 6px 6px 0; background: var(--muted); }
+  .nodes button.stopped { background: #dc2626; }
   td:last-child { text-align: right; }
 </style>
 </head>
@@ -86,6 +88,9 @@
     </div>
   </div>
 
+  <h2>Camera nodes</h2>
+  <div class="row nodes" id="nodes"></div>
+
   <h2>Display</h2>
   <div class="row"><label><span><input type="checkbox" id="show_cones" checked> Show view cones</span></label></div>
 </div>
@@ -107,6 +112,8 @@ const BEE_RADIUS_M = 0.008;            // display size, enlarged to be visible
 const CONE_LENGTH_M = 0.12;            // display only
 const CONE_OPACITY = 0.08;
 const CAMERA_MARKER_SIZE_M = 0.01;
+const CAMERA_COLOR = 0x10b981;
+const STOPPED_CAMERA_COLOR = 0xdc2626;
 const BEE_COLORS = { flying: 0xf97316, walking: 0x2563eb, sitting: 0x9ca3af };
 const DEFAULT_ARENA_M = [0.9, 0.3, 0.3];
 const CONTROL_NAMES = ["bee_count", "max_speed_m_s", "pixel_sigma_px",
@@ -134,6 +141,7 @@ const beeMaterials = Object.fromEntries(
 
 let arenaSize = DEFAULT_ARENA_M;
 let lastState = null;
+let nodeCameras = [];   // [{id, cameras}] from the scene message
 
 // Place the orbit camera in front of the long side, looking at the arena centre.
 function resetView(size) {
@@ -182,13 +190,14 @@ function buildArena(size) {
 function buildCamera(cam) {
   const group = new THREE.Group();
   group.position.fromArray(cam.position_m);
+  group.name = cam.id;
   group.add(new THREE.Mesh(new THREE.BoxGeometry(CAMERA_MARKER_SIZE_M, CAMERA_MARKER_SIZE_M,
-    CAMERA_MARKER_SIZE_M), new THREE.MeshBasicMaterial({ color: 0x10b981 })));
+    CAMERA_MARKER_SIZE_M), new THREE.MeshBasicMaterial({ color: CAMERA_COLOR })));
 
   const halfAngle = cam.fov_horizontal_rad / 2;
   const radius = CONE_LENGTH_M * Math.tan(Math.min(halfAngle, 1.5));
   const cone = new THREE.Mesh(new THREE.ConeGeometry(radius, CONE_LENGTH_M, 24, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: CONE_OPACITY,
+    new THREE.MeshBasicMaterial({ color: CAMERA_COLOR, transparent: true, opacity: CONE_OPACITY,
                                   side: THREE.DoubleSide, depthWrite: false }));
   cone.name = "cone";
   // ConeGeometry has its apex at +y; move the apex to the origin and point +y along the view axis.
@@ -207,7 +216,40 @@ function handleScene(msg) {
   buildArena(arenaSize);
   clearGroup(cameraGroup);
   msg.cameras.forEach(buildCamera);
+  nodeCameras = msg.nodes || [];
+  buildNodeButtons(nodeCameras);
   resetView(arenaSize);
+}
+
+// Make one toggle button per camera node; a click asks the server for the opposite state.
+function buildNodeButtons(nodes) {
+  const box = $("nodes");
+  box.textContent = "";
+  for (const node of nodes) {
+    const button = document.createElement("button");
+    button.id = `node-${node.id}`;
+    button.addEventListener("click", () => {
+      const stopped = !!(lastState && lastState.stopped_nodes.includes(node.id));
+      sendControl("node_stopped", { node_id: node.id, stopped: !stopped });
+    });
+    box.appendChild(button);
+  }
+}
+
+// Show running / STOPPED on the buttons and colour the cameras of stopped nodes red.
+function updateNodes(stoppedIds) {
+  for (const node of nodeCameras) {
+    const stopped = stoppedIds.includes(node.id);
+    const button = $(`node-${node.id}`);
+    button.textContent = `${node.id}: ${stopped ? "STOPPED" : "running"}`;
+    button.classList.toggle("stopped", stopped);
+    for (const cameraId of node.cameras) {
+      const group = cameraGroup.getObjectByName(cameraId);
+      if (group) group.traverse(o => {
+        if (o.material) o.material.color.setHex(stopped ? STOPPED_CAMERA_COLOR : CAMERA_COLOR);
+      });
+    }
+  }
 }
 
 // Create, move, recolour and remove bee meshes to match the state message.
@@ -268,6 +310,7 @@ function updatePanel(msg) {
   if (msg.settings.bee_count !== undefined) setWidget("bee_count_num", msg.settings.bee_count);
   setWidget("seed", msg.seed);
   $("paused").textContent = msg.paused ? "Resume" : "Pause";
+  updateNodes(msg.stopped_nodes || []);
 }
 
 // ---- websocket ----

@@ -6,6 +6,7 @@ It sits after triangulation and before the control interface: points come in,
 tracks with stable ids go out. All times are simulation time supplied by the caller.
 """
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,6 +23,7 @@ _AXES = 3  # x, y, z
 _STATE_DIM = 3 * _AXES  # position, velocity, acceleration per axis
 _VELOCITY = slice(_AXES, 2 * _AXES)
 _POSITION = slice(0, _AXES)
+_ACCELERATION = slice(2 * _AXES, 3 * _AXES)
 # Cost used for pairs outside the gate so the solver avoids them; they are dropped afterwards.
 _FORBIDDEN_COST_M = 1e6
 
@@ -41,6 +43,9 @@ class Track:
         missed: Consecutive frames without a supporting point.
         motion: SITTING or FLYING.
         camera_count: Cameras that supported the last point (0 when missed).
+        smoothed_acceleration: Shape (3,), exponentially smoothed acceleration of the
+            filter in m/s^2, arena frame; zero for a new track.
+        updated_s: Simulation time in s of the last update with a point.
     """
 
     id: int
@@ -52,6 +57,8 @@ class Track:
     missed: int
     motion: str
     camera_count: int
+    smoothed_acceleration: np.ndarray
+    updated_s: float
 
 
 @dataclass
@@ -166,7 +173,7 @@ def _new_track(track_id: int, position_m: np.ndarray, t_s: float, settings: Trac
         ],
         _AXES,
     )
-    return Track(track_id, state, np.diag(sigmas**2), t_s, False, 1, 0, SITTING, 0)
+    return Track(track_id, state, np.diag(sigmas**2), t_s, False, 1, 0, SITTING, 0, np.zeros(_AXES), t_s)
 
 
 def _kalman_update(track: Track, position_m: np.ndarray, settings: TrackerSettings) -> None:
@@ -189,6 +196,40 @@ def _kalman_update(track: Track, position_m: np.ndarray, settings: TrackerSettin
     track.covariance = i_kh @ p @ i_kh.T + gain @ r @ gain.T
 
 
+def _smooth_acceleration(track: Track, settings: TrackerSettings) -> None:
+    """Fold the filter's acceleration into the smoothed acceleration, in place.
+
+    A first-order low-pass filter that is exact for uneven steps: the weight of the new value
+    is 1 - exp(-dt / tau), so the response to a step is the same however the time is cut.
+
+    Args:
+        track: Track just corrected with a point; `t_s` is the time of this update.
+        settings: Tracker settings (acceleration_smoothing_s, the time constant tau in s).
+    """
+    dt_s = track.t_s - track.updated_s
+    weight = 1.0 - math.exp(-dt_s / settings.acceleration_smoothing_s)
+    track.smoothed_acceleration += weight * (track.state[_ACCELERATION] - track.smoothed_acceleration)
+    track.updated_s = track.t_s
+
+
+def extrapolate(track: Track, t_s: float) -> np.ndarray:
+    """Position of a track at a given time by constant acceleration; the track is unchanged.
+
+    Args:
+        track: Track whose filter state is valid at `track.t_s`.
+        t_s: Simulation time in s to extrapolate to.
+
+    Returns:
+        Shape (3,) position in m, arena frame: p + v dt + a dt^2 / 2.
+    """
+    dt_s = t_s - track.t_s
+    return (
+        track.state[_POSITION]
+        + track.state[_VELOCITY] * dt_s
+        + track.state[_ACCELERATION] * dt_s**2 / 2.0
+    )
+
+
 def _apply_point(track: Track, position_m: np.ndarray, camera_count: int, settings: TrackerSettings) -> None:
     """Update a track that received a point this frame.
 
@@ -199,6 +240,7 @@ def _apply_point(track: Track, position_m: np.ndarray, camera_count: int, settin
         settings: Tracker settings (measurement_sigma_m, confirm_frames).
     """
     _kalman_update(track, position_m, settings)
+    _smooth_acceleration(track, settings)
     track.hits += 1
     track.missed = 0
     track.camera_count = camera_count
@@ -293,7 +335,7 @@ def update_tracks(
     track_ids: np.ndarray,
     t_s: float,
     settings: TrackerSettings,
-) -> None:
+) -> np.ndarray:
     """Fold one frame of points into the tracks, in place.
 
     Call after predict_tracks(track_set, t_s, settings).
@@ -305,6 +347,9 @@ def update_tracks(
         track_ids: Shape (P,) id of the track each point belongs to, or NEW_POINT.
         t_s: Simulation time in s of this frame.
         settings: Tracker settings.
+
+    Returns:
+        Shape (P,) id of the track each point ended up with: an existing track or a new one.
     """
     matches = _match_labelled(track_set, track_ids)
     free_points = [i for i in range(len(positions_m)) if i not in matches.values()]
@@ -316,13 +361,16 @@ def update_tracks(
             _apply_point(track, positions_m[index], int(camera_counts[index]), settings)
         else:
             _apply_miss(track)
-    used = set(matches.values())
-    for index in range(len(positions_m)):
-        if index not in used:
-            new = _new_track(track_set.next_id, positions_m[index], t_s, settings)
-            new.camera_count = int(camera_counts[index])
-            track_set.tracks.append(new)
-            track_set.next_id += 1
+    point_track_ids = np.full(len(positions_m), NEW_POINT, dtype=int)
+    for track_id, index in matches.items():
+        point_track_ids[index] = track_id
+    for index in np.flatnonzero(point_track_ids == NEW_POINT):
+        new = _new_track(track_set.next_id, positions_m[index], t_s, settings)
+        new.camera_count = int(camera_counts[index])
+        point_track_ids[index] = new.id
+        track_set.tracks.append(new)
+        track_set.next_id += 1
     track_set.tracks = [t for t in track_set.tracks if not _is_expired(t, settings)]
     for track in track_set.tracks:
         _update_motion(track, settings)
+    return point_track_ids
