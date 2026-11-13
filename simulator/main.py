@@ -5,6 +5,11 @@ clock, no sockets) so tests can use them; `run` adds the UDP socket, the wall-cl
 pacing and the simulator window: one port that serves the page and a WebSocket over
 which the page receives `scene` and `state` messages and sends `control` messages.
 The page changes the simulation only through `apply_control`.
+
+The robot emulator runs inside the simulation so that it shares simulation time: every
+frame, `step_simulation` lets the robot's stereo camera look at the true bees and runs
+the robot's control steps. `run` also receives the `target` datagrams for the robot and
+relays the cinema view, which the simulator window renders, to the control window.
 """
 
 import argparse
@@ -22,15 +27,38 @@ import numpy as np
 from websockets.asyncio.server import ServerConnection, broadcast, serve
 from websockets.http11 import Request, Response
 
-from shared.config import Config, frame_rate_hz, load_config
-from shared.geometry import CameraPose, camera_pose
-from shared.protocol import UDP_HOST, Truth, TruthBee, encode_truth
+from robot_emulator.controller import (
+    Controller,
+    apply_exposure,
+    create_controller,
+    has_target,
+    pose_message,
+    receive_target,
+    step_controller,
+)
+from robot_emulator.stereo import observe_stereo
+from shared.config import Config, Robot, frame_rate_hz, load_config, load_robot
+from shared.geometry import CameraPose, camera_pose, robot_camera_pose
+from shared.protocol import (
+    UDP_HOST,
+    ProtocolError,
+    RobotAxes,
+    Target,
+    Truth,
+    TruthBee,
+    decode,
+    encode_robot_pose,
+    encode_truth,
+)
 from shared.web import page_response
 from simulator.bees import Bee, create_bee, create_bees, step_bees
 from simulator.cameras import observe_bees
 from simulator.nodes import Outgoing, node_messages
 
 DEFAULT_CONFIG_PATH = Path("config/default.yaml")
+DEFAULT_ROBOT_PATH = Path("config/robot.yaml")
+# WebSocket path on which the control window receives the cinema view.
+CINEMA_PATH = "/cinema"
 PAGE_PATH = Path(__file__).parent / "web" / "index.html"
 # How often the page gets a `state` message, in wall-clock time. 30 Hz looks smooth and
 # keeps the message load small.
@@ -52,14 +80,28 @@ MAX_SEED = 2**32 - 1
 MIN_SLEEP_S = 0.001
 # While paused the frame loop looks for a resume every 20 ms of wall time.
 PAUSE_POLL_S = 0.02
+# Slack when comparing times that were computed as count / rate (s).
+TIME_EPSILON_S = 1e-9
+# Robot limits the page may change: control name -> (axis, limit, largest allowed value).
+# Units: m/s and m/s^2 for the rail, rad/s and rad/s^2 for the tilt. The upper bounds only
+# keep absurd values out; they are far above any real drive.
+ROBOT_LIMIT_CONTROLS = {
+    "rail_max_speed_m_s": ("rail", "max_speed", 20.0),
+    "rail_max_acceleration_m_s2": ("rail", "max_acceleration", 500.0),
+    "tilt_max_speed_rad_s": ("tilt", "max_speed", 100.0),
+    "tilt_max_acceleration_rad_s2": ("tilt", "max_acceleration", 5000.0),
+}
 
 
-def _truth_messages(config: Config, bees: list[Bee], frame: int, t_s: float) -> list[Outgoing]:
+def _truth_messages(
+    config: Config, bees: list[Bee], controller: Controller, frame: int, t_s: float
+) -> list[Outgoing]:
     """Build the truth datagrams of one frame.
 
     Args:
         config: Configuration (ports).
         bees: Current bees, arena frame (m, m/s).
+        controller: The robot; its axes are reported as they are at `t_s`.
         frame: Frame number.
         t_s: Simulation time (s).
 
@@ -78,7 +120,9 @@ def _truth_messages(config: Config, bees: list[Bee], frame: int, t_s: float) -> 
             )
             for bee in bees
         ),
-        robot=None,
+        robot=RobotAxes(
+            controller.rail.position, controller.tilt.position, controller.focus.position
+        ),
     )
     return [Outgoing(t_s, config.ports.truth, d) for d in encode_truth(message)]
 
@@ -98,6 +142,10 @@ class Simulation:
         paused: True while the frame loop must not step.
         time_scale: Simulation seconds per wall-clock second.
         stopped_nodes: Ids of camera nodes that send nothing (as if their computer failed).
+        controller: The emulated robot; `controller.robot` holds its current limits.
+        robot_rng: Random generator of the robot's stereo camera, spawned from `rng`.
+        control_steps: Robot control steps done since frame 0.
+        exposures: Stereo exposures done since frame 0.
     """
 
     config: Config
@@ -109,14 +157,19 @@ class Simulation:
     next_bee_id: int
     paused: bool
     time_scale: float
+    controller: Controller
+    robot_rng: np.random.Generator
+    control_steps: int = 0
+    exposures: int = 0
     stopped_nodes: frozenset[str] = frozenset()
 
 
-def create_simulation(config: Config, seed: int, time_scale: float) -> Simulation:
+def create_simulation(config: Config, robot: Robot, seed: int, time_scale: float) -> Simulation:
     """Create a simulation at frame 0.
 
     Args:
         config: Configuration.
+        robot: Robot description.
         seed: Seed of the random generator.
         time_scale: Simulation seconds per wall-clock second.
 
@@ -126,14 +179,75 @@ def create_simulation(config: Config, seed: int, time_scale: float) -> Simulatio
     rng = np.random.default_rng(seed)
     poses = {c.id: camera_pose(c.position_m, c.look_at_m) for c in config.cameras}
     bees = create_bees(config.bees, config.arena, rng)
-    return Simulation(config, seed, rng, poses, bees, 0, len(bees), False, time_scale)
+    # The robot's draws depend on when `target` arrives over UDP. A generator of its own,
+    # spawned from the one seed, keeps them from shifting the bees and the cameras.
+    robot_rng = rng.spawn(1)[0]
+    return Simulation(
+        config, seed, rng, poses, bees, 0, len(bees), False, time_scale,
+        create_controller(robot), robot_rng,
+    )
+
+
+def _expose_stereo(simulation: Simulation, frame_t_s: float, t_s: float) -> None:
+    """Let the robot's stereo camera look at the bees and hand the blobs to the robot.
+
+    Args:
+        simulation: Simulation; the robot and its random generator are modified.
+        frame_t_s: Time the bee positions are valid for (s).
+        t_s: Time of the exposure (s), at or after `frame_t_s`.
+    """
+    controller = simulation.controller
+    bees = simulation.bees
+    positions_m = np.array([bee.position_m for bee in bees]).reshape(-1, 3)
+    velocities_m_s = np.array([bee.velocity_m_s for bee in bees]).reshape(-1, 3)
+    pose = robot_camera_pose(controller.robot, controller.rail.position, controller.tilt.position)
+    blobs = observe_stereo(
+        pose,
+        controller.robot.stereo,
+        # Bees move once per frame; between frames they are carried on with their velocity.
+        positions_m + velocities_m_s * (t_s - frame_t_s),
+        simulation.config.bees.body_length_m,
+        simulation.robot_rng,
+    )
+    apply_exposure(controller, t_s, blobs)
+
+
+def _step_robot(simulation: Simulation, frame_t_s: float, period_s: float) -> list[Outgoing]:
+    """Run the robot's control steps that end within one frame period.
+
+    A stereo exposure that is due is taken at the start of a control step, so exposures
+    are aligned to the control rate.
+
+    Args:
+        simulation: Simulation; the robot is modified in place.
+        frame_t_s: Start of the frame (s).
+        period_s: Frame period (s).
+
+    Returns:
+        One `robot_pose` datagram per control step, leaving at the end of its step.
+    """
+    controller = simulation.controller
+    step_s = 1.0 / controller.robot.control.rate_hz
+    exposure_s = 1.0 / controller.robot.stereo.model.rate_hz
+    out = []
+    while (simulation.control_steps + 1) * step_s <= frame_t_s + period_s + TIME_EPSILON_S:
+        start_s = simulation.control_steps * step_s
+        if simulation.exposures * exposure_s <= start_s + TIME_EPSILON_S:
+            _expose_stereo(simulation, frame_t_s, start_s)
+            simulation.exposures += 1
+        end_s = start_s + step_s
+        step_controller(controller, end_s, step_s)
+        simulation.control_steps += 1
+        datagram = encode_robot_pose(pose_message(controller, end_s))
+        out.append(Outgoing(end_s, simulation.config.ports.robot_pose, datagram))
+    return out
 
 
 def step_simulation(simulation: Simulation) -> list[Outgoing]:
-    """Produce the datagrams of the next frame, then advance the bees by one frame.
+    """Produce the datagrams of the next frame, then advance robot and bees by one frame.
 
     Args:
-        simulation: Simulation, modified in place (bees, random generator, frame).
+        simulation: Simulation, modified in place (bees, robot, random generators, frame).
 
     Returns:
         The datagrams sorted by send time (stable).
@@ -141,7 +255,7 @@ def step_simulation(simulation: Simulation) -> list[Outgoing]:
     config = simulation.config
     rate_hz = frame_rate_hz(config)
     t_s = simulation.frame / rate_hz
-    out = _truth_messages(config, simulation.bees, simulation.frame, t_s)
+    out = _truth_messages(config, simulation.bees, simulation.controller, simulation.frame, t_s)
     seen = {
         c.id: observe_bees(
             simulation.poses[c.id],
@@ -162,6 +276,7 @@ def step_simulation(simulation: Simulation) -> list[Outgoing]:
         # draws then stay the same, so the truth and the other nodes do not change.
         if node.id not in simulation.stopped_nodes:
             out.extend(messages)
+    out.extend(_step_robot(simulation, t_s, 1.0 / rate_hz))
     step_bees(simulation.bees, config.bees, config.arena, 1.0 / rate_hz, simulation.rng)
     simulation.frame += 1
     return sorted(out, key=lambda o: o.send_time_s)
@@ -333,12 +448,18 @@ def _restart(simulation: Simulation, value: object) -> None:
         ValueError: If the value is not such an integer.
     """
     seed = _integer("seed", value, 0, MAX_SEED)
-    fresh = create_simulation(simulation.config, seed, simulation.time_scale)
+    fresh = create_simulation(
+        simulation.config, simulation.controller.robot, seed, simulation.time_scale
+    )
     simulation.seed = fresh.seed
     simulation.rng = fresh.rng
     simulation.bees = fresh.bees
     simulation.frame = fresh.frame
     simulation.next_bee_id = fresh.next_bee_id
+    simulation.controller = fresh.controller
+    simulation.robot_rng = fresh.robot_rng
+    simulation.control_steps = fresh.control_steps
+    simulation.exposures = fresh.exposures
 
 
 def _set_node_stopped(simulation: Simulation, value: object) -> None:
@@ -364,6 +485,30 @@ def _set_node_stopped(simulation: Simulation, value: object) -> None:
         simulation.stopped_nodes = simulation.stopped_nodes - {node_id}
 
 
+def _robot_limit_setter(name: str) -> Callable[[Simulation, object], None]:
+    """Build the control that changes one speed or acceleration limit of the robot.
+
+    Args:
+        name: Control name, a key of ROBOT_LIMIT_CONTROLS.
+
+    Returns:
+        The control function; it raises ValueError for a value that is not a number above 0
+        and at most the largest allowed value.
+    """
+    axis_name, limit_name, largest = ROBOT_LIMIT_CONTROLS[name]
+
+    def set_limit(simulation: Simulation, value: object) -> None:
+        """Replace the limit in the robot description of the running robot."""
+        limit = _number(name, value)
+        if not 0.0 < limit <= largest:
+            raise ValueError(f"{name} must be above 0 and at most {largest}, got {value!r}")
+        robot = simulation.controller.robot
+        axis = replace(getattr(robot, axis_name), **{limit_name: limit})
+        simulation.controller.robot = replace(robot, **{axis_name: axis})
+
+    return set_limit
+
+
 _CONTROLS: dict[str, Callable[[Simulation, object], None]] = {
     "bee_count": _set_bee_count,
     "max_speed_m_s": _set_max_speed,
@@ -373,6 +518,7 @@ _CONTROLS: dict[str, Callable[[Simulation, object], None]] = {
     "time_scale": _set_time_scale,
     "seed": _restart,
     "node_stopped": _set_node_stopped,
+    **{name: _robot_limit_setter(name) for name in ROBOT_LIMIT_CONTROLS},
 }
 
 
@@ -382,7 +528,8 @@ def apply_control(simulation: Simulation, name: str, value: object) -> None:
     Args:
         simulation: Simulation, modified in place. Call only between frames.
         name: Control name: bee_count, max_speed_m_s, pixel_sigma_px,
-            dropout_probability, paused, time_scale, seed or node_stopped.
+            dropout_probability, paused, time_scale, seed, node_stopped or one of
+            ROBOT_LIMIT_CONTROLS.
         value: New value; its type and range depend on the control.
 
     Raises:
@@ -393,11 +540,12 @@ def apply_control(simulation: Simulation, name: str, value: object) -> None:
     _CONTROLS[name](simulation, value)
 
 
-def scene_message(config: Config) -> str:
-    """Build the `scene` message: the arena box, the camera poses and the nodes.
+def scene_message(config: Config, robot: Robot) -> str:
+    """Build the `scene` message: arena box, camera poses, nodes and robot geometry.
 
     Args:
         config: Configuration (arena size in m, cameras in the arena frame).
+        robot: Robot description (rail in the arena frame, cinema camera).
 
     Returns:
         JSON text of the message.
@@ -417,12 +565,21 @@ def scene_message(config: Config) -> str:
         "arena_size_m": list(config.arena.size_m),
         "cameras": cameras,
         "nodes": nodes,
+        "body_length_m": config.bees.body_length_m,
+        "robot": {
+            "rail_start_m": list(robot.rail_start_m),
+            "rail_length_m": robot.rail.upper,
+            "lens_offset_m": robot.lens_offset_m,
+            "cinema_fov_horizontal_rad": robot.cinema.fov_horizontal_rad,
+            "cinema_aspect_ratio": robot.cinema.aspect_ratio,
+            "depth_of_field_m": robot.cinema.depth_of_field_m,
+        },
     }
     return json.dumps(message, separators=(",", ":"))
 
 
 def state_message(simulation: Simulation) -> str:
-    """Build the `state` message: bees as they are now and the current settings.
+    """Build the `state` message: bees and robot as they are now and the current settings.
 
     Args:
         simulation: Simulation; `frame` and `t` describe the next frame to be produced.
@@ -431,10 +588,12 @@ def state_message(simulation: Simulation) -> str:
         JSON text of the message; positions in the arena frame, rounded, metres.
     """
     config = simulation.config
+    controller = simulation.controller
+    t_s = simulation.frame / frame_rate_hz(config)
     message = {
         "type": "state",
         "frame": simulation.frame,
-        "t": round(simulation.frame / frame_rate_hz(config), TIME_DECIMALS),
+        "t": round(t_s, TIME_DECIMALS),
         "seed": simulation.seed,
         "paused": simulation.paused,
         "time_scale": simulation.time_scale,
@@ -444,6 +603,16 @@ def state_message(simulation: Simulation) -> str:
             "max_speed_m_s": config.bees.max_speed_m_s,
             "pixel_sigma_px": config.noise.pixel_sigma_px,
             "dropout_probability": config.noise.dropout_probability,
+            **{
+                name: getattr(getattr(controller.robot, axis_name), limit_name)
+                for name, (axis_name, limit_name, _) in ROBOT_LIMIT_CONTROLS.items()
+            },
+        },
+        "robot": {
+            "rail_m": round(controller.rail.position, POSITION_DECIMALS),
+            "tilt_rad": round(controller.tilt.position, POSITION_DECIMALS),
+            "focus_m": round(controller.focus.position, POSITION_DECIMALS),
+            "has_target": has_target(controller, t_s),
         },
         "bees": [
             {
@@ -474,6 +643,42 @@ def _apply_message(simulation: Simulation, raw: str | bytes) -> None:
     if not isinstance(message, dict) or message.get("type") != "control":
         raise ValueError("not a control message")
     apply_control(simulation, message.get("name"), message.get("value"))
+
+
+def apply_target(simulation: Simulation, datagram: bytes) -> None:
+    """Hand a `target` datagram to the robot; anything else is ignored.
+
+    Args:
+        simulation: Simulation; the robot is modified in place.
+        datagram: One UDP datagram from the tracker.
+    """
+    try:
+        message = decode(datagram)
+    except ProtocolError:
+        return
+    if isinstance(message, Target):
+        receive_target(simulation.controller, message)
+
+
+class _TargetProtocol(asyncio.DatagramProtocol):
+    """Receives `target` datagrams on the event loop, between two frames."""
+
+    def __init__(self, simulation: Simulation) -> None:
+        """Create the protocol.
+
+        Args:
+            simulation: The running simulation.
+        """
+        self._simulation = simulation
+
+    def datagram_received(self, data: bytes, addr: object) -> None:
+        """Hand one datagram to the robot.
+
+        Args:
+            data: The datagram bytes.
+            addr: Sender address (unused).
+        """
+        apply_target(self._simulation, data)
 
 
 def _serve_page(connection: ServerConnection, request: Request) -> Response | None:
@@ -568,61 +773,96 @@ async def _snapshot_loop(simulation: Simulation, pages: set[ServerConnection]) -
 
 
 async def _serve(
-    config: Config, seed: int, duration_s: float | None, time_scale: float, fast: bool
+    config: Config,
+    robot: Robot,
+    seed: int,
+    duration_s: float | None,
+    time_scale: float,
+    fast: bool,
 ) -> None:
     """Run the simulation with its window server until the duration is over.
 
     Args:
         config: Configuration.
+        robot: Robot description.
         seed: Seed of the random generator.
         duration_s: Simulation time to run (s), or None to run until interrupted.
         time_scale: Initial simulation seconds per wall-clock second.
         fast: Send as fast as possible, no pacing.
     """
-    simulation = create_simulation(config, seed, time_scale)
+    simulation = create_simulation(config, robot, seed, time_scale)
     pages: set[ServerConnection] = set()
+    viewers: set[ServerConnection] = set()
     pending: list[str | bytes] = []
 
+    async def handle_viewer(connection: ServerConnection) -> None:
+        """Keep a cinema viewer (the control window) until it disconnects."""
+        viewers.add(connection)
+        try:
+            await connection.wait_closed()
+        finally:
+            viewers.discard(connection)
+
     async def handle_page(connection: ServerConnection) -> None:
-        """Send the scene, then queue the controls the page sends for the frame loop."""
-        await connection.send(scene_message(simulation.config))
+        """Send the scene, then queue the page's controls and relay its cinema images."""
+        if connection.request.path == CINEMA_PATH:
+            await handle_viewer(connection)
+            return
+        await connection.send(scene_message(simulation.config, simulation.controller.robot))
         pages.add(connection)
         try:
             async for raw in connection:
-                pending.append(raw)
+                # Text is a control; binary is one image of the cinema view.
+                if isinstance(raw, bytes):
+                    broadcast(viewers, raw)
+                else:
+                    pending.append(raw)
         finally:
             pages.discard(connection)
 
-    async with serve(
-        handle_page, UDP_HOST, config.ports.simulator_window, process_request=_serve_page
-    ):
-        snapshots = asyncio.create_task(_snapshot_loop(simulation, pages))
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                await _frame_loop(simulation, pending, sock, duration_s, fast)
-        finally:
-            snapshots.cancel()
+    targets, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+        lambda: _TargetProtocol(simulation), local_addr=(UDP_HOST, config.ports.target)
+    )
+    try:
+        async with serve(
+            handle_page, UDP_HOST, config.ports.simulator_window, process_request=_serve_page
+        ):
+            snapshots = asyncio.create_task(_snapshot_loop(simulation, pages))
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                    await _frame_loop(simulation, pending, sock, duration_s, fast)
+            finally:
+                snapshots.cancel()
+    finally:
+        targets.close()
 
 
 def run(
-    config: Config, seed: int, duration_s: float | None, time_scale: float, fast: bool
+    config: Config,
+    robot: Robot,
+    seed: int,
+    duration_s: float | None,
+    time_scale: float,
+    fast: bool,
 ) -> None:
     """Run the simulator: send all datagrams over UDP and serve the simulator window.
 
     Args:
         config: Configuration.
+        robot: Robot description.
         seed: Seed of the random generator.
         duration_s: Simulation time to run (s), or None to run until interrupted.
         time_scale: Initial simulation seconds per wall-clock second (1.0 = real time).
         fast: Send as fast as possible, no pacing.
     """
-    asyncio.run(_serve(config, seed, duration_s, time_scale, fast))
+    asyncio.run(_serve(config, robot, seed, duration_s, time_scale, fast))
 
 
 def main() -> None:
     """Parse the command line and run the simulator."""
     parser = argparse.ArgumentParser(description="Bee tracking simulator")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--robot", type=Path, default=DEFAULT_ROBOT_PATH, help="robot file")
     parser.add_argument("--seed", type=int, default=None, help="default: seed from config")
     parser.add_argument("--duration", type=float, default=None, help="simulation seconds")
     parser.add_argument("--time-scale", type=float, default=1.0)
@@ -633,7 +873,7 @@ def main() -> None:
     config = load_config(args.config)
     seed = config.seed if args.seed is None else args.seed
     try:
-        run(config, seed, args.duration, args.time_scale, args.fast)
+        run(config, load_robot(args.robot), seed, args.duration, args.time_scale, args.fast)
     except KeyboardInterrupt:
         pass
 

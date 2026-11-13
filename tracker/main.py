@@ -6,6 +6,10 @@ first, then new points), updates the tracks and writes one JSON line to the log.
 `process_frame` is pure (no socket, no clock) so tests can drive it directly; `run` adds
 the UDP socket and the log file.
 
+While a track is selected, every frame also yields a `target` message for the robot. Its
+distance and the list of other bees in the robot's view are computed from the last
+`robot_pose` the robot sent.
+
 The tracker also serves the control window: a browser page that gets a `scene` message on
 connect and `tracks` snapshots over a WebSocket, and answers with `select` messages that
 say which track is selected. The message builders here are pure as well.
@@ -27,17 +31,26 @@ from websockets.exceptions import ConnectionClosed
 from shared.config import (
     Arena,
     Config,
+    Robot,
     TrackerSettings,
     frame_rate_hz,
     last_frame_of,
     load_config,
+    load_robot,
 )
+from shared.geometry import is_visible, project, robot_camera_pose
 from shared.protocol import (
     METRE_DECIMALS,
     PIXEL_DECIMALS,
     RATE_DECIMALS,
     SECOND_DECIMALS,
     UDP_HOST,
+    OtherBee,
+    ProtocolError,
+    RobotPose,
+    Target,
+    decode,
+    encode_target,
 )
 from shared.web import page_response
 from tracker.receiver import TIME_ROUNDING_S, Frame, FrameAssembler, frames_from_datagram
@@ -60,6 +73,7 @@ from tracker.triangulate import (
 )
 
 DEFAULT_CONFIG_PATH = Path("config/default.yaml")
+DEFAULT_ROBOT_PATH = Path("config/robot.yaml")
 DEFAULT_LOG_PATH = Path("logs/tracks.jsonl")
 # Room for about one second of detections, so a short stall of the tracker loses nothing.
 RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
@@ -71,6 +85,9 @@ PAGE_PATH = Path(__file__).parent / "web" / "index.html"
 SNAPSHOT_RATE_HZ = 30
 # `track_id` of a detection that no track used.
 UNUSED_DETECTION = -1
+# Most other bees listed in one `target`. Sixteen entries keep the datagram well below the
+# 1400 bytes a `target` may have; the bees nearest to the target in the image are kept.
+MAX_OTHERS = 16
 
 
 @dataclass
@@ -86,27 +103,39 @@ class Tracker:
         last_frame: Number of the last processed frame, or None before the first.
         detections: Camera id to `[u_px, v_px, size_px, track_id]` per detection of the
             last frame; `track_id` is -1 for a detection no track used.
+        robot: Robot description (geometry and stereo camera), for `target`.
+        auto_select: Select the oldest confirmed track whenever none is selected, for
+            runs without a control window.
+        robot_pose: The newest `robot_pose`, or None before the first.
     """
 
     cameras: list[TrackingCamera]
     arena: Arena
     settings: TrackerSettings
     track_set: TrackSet
+    robot: Robot
+    auto_select: bool = False
+    robot_pose: RobotPose | None = None
     selected_id: int | None = None
     last_frame: int | None = None
     detections: dict[str, list[list[float]]] = field(default_factory=dict)
 
 
-def create_tracker(config: Config) -> Tracker:
+def create_tracker(config: Config, robot: Robot, auto_select: bool = False) -> Tracker:
     """Build a tracker without tracks from the configuration.
 
     Args:
         config: Configuration. Camera poses are the nominal ones from the file.
+        robot: Robot description.
+        auto_select: Select the oldest confirmed track whenever none is selected.
 
     Returns:
         The tracker.
     """
-    return Tracker(tracking_cameras(config), config.arena, config.tracker, create_track_set())
+    return Tracker(
+        tracking_cameras(config), config.arena, config.tracker, create_track_set(), robot,
+        auto_select,
+    )
 
 
 def _rounded(values: np.ndarray, decimals: int) -> list[float]:
@@ -181,6 +210,22 @@ def _restart_tracks(tracker: Tracker) -> None:
     """
     tracker.track_set = TrackSet(tracks=[], next_id=tracker.track_set.next_id)
     tracker.selected_id = None
+    # Poses of the old run carry later times and would shadow those of the new run.
+    tracker.robot_pose = None
+
+
+def _update_selection(tracker: Tracker) -> None:
+    """Clear the selection of a removed track; pick one when `auto_select` is on.
+
+    Args:
+        tracker: Tracker, modified in place.
+    """
+    tracks = tracker.track_set.tracks
+    if tracker.selected_id not in {track.id for track in tracks}:
+        tracker.selected_id = None
+    confirmed = [track.id for track in tracks if track.confirmed]
+    if tracker.auto_select and tracker.selected_id is None and confirmed:
+        tracker.selected_id = min(confirmed)
 
 
 def process_frame(tracker: Tracker, frame: Frame) -> dict[str, Any]:
@@ -194,7 +239,7 @@ def process_frame(tracker: Tracker, frame: Frame) -> dict[str, Any]:
         frame: Detections of one frame with its exposure time (simulation s).
 
     Returns:
-        The log record of the frame: frame number, time and all tracks.
+        The log record of the frame: frame number, time, selected track id and all tracks.
     """
     if tracker.last_frame is not None and frame.frame < tracker.last_frame:
         _restart_tracks(tracker)
@@ -216,13 +261,104 @@ def process_frame(tracker: Tracker, frame: Frame) -> dict[str, Any]:
         tracker.settings,
     )
     tracker.detections = _detection_records(frame, rays, points, point_track_ids, tracker.cameras)
-    if tracker.selected_id not in {track.id for track in tracks.tracks}:
-        tracker.selected_id = None
+    _update_selection(tracker)
     return {
         "frame": frame.frame,
         "t": round(frame.t_s, SECOND_DECIMALS),
+        "selected": tracker.selected_id,
         "tracks": [_track_record(track) for track in tracks.tracks],
     }
+
+
+def _confidence(tracker: Tracker, track: Track) -> float:
+    """Share of the cameras covering the track's position that confirm it in this frame.
+
+    Args:
+        tracker: Tracker (tracking cameras).
+        track: The track; position in the arena frame (m).
+
+    Returns:
+        A value from 0 to 1; 0 when no camera covers the position.
+    """
+    position_m = track.state[:_AXES].reshape(1, _AXES)
+    expected = sum(
+        bool(is_visible(camera.pose, camera.model, position_m)[0]) for camera in tracker.cameras
+    )
+    return min(1.0, track.camera_count / expected) if expected else 0.0
+
+
+def _others_in_view(tracker: Tracker, selected: Track, pose: RobotPose) -> tuple[OtherBee, ...]:
+    """List the other confirmed bees the robot's stereo camera should see.
+
+    Args:
+        tracker: Tracker (tracks and robot description).
+        selected: The selected track.
+        pose: The newest robot pose.
+
+    Returns:
+        At most MAX_OTHERS bees, those nearest to the selected bee in the stereo image first.
+    """
+    others = [t for t in tracker.track_set.tracks if t.confirmed and t.id != selected.id]
+    if not others:
+        return ()
+    camera = robot_camera_pose(tracker.robot, pose.rail_m, pose.tilt_rad)
+    model = tracker.robot.stereo.model
+    positions_m = np.array([track.state[:_AXES] for track in [selected] + others])
+    pixels_px = project(camera, model, positions_m)
+    visible = is_visible(camera, model, positions_m)
+    offsets_px = np.linalg.norm(pixels_px[1:] - pixels_px[0], axis=1)
+    order = [i for i in np.argsort(offsets_px, kind="stable") if visible[i + 1]]
+    return tuple(
+        OtherBee(others[i].id, tuple(float(x) for x in others[i].state[:_AXES]))
+        for i in order[:MAX_OTHERS]
+    )
+
+
+def target_message(tracker: Tracker) -> Target | None:
+    """Build the `target` message for the selected track.
+
+    Args:
+        tracker: Tracker after `process_frame`.
+
+    Returns:
+        The message, or None when no track is selected or no `robot_pose` has arrived yet
+        (the distance cannot be computed without one).
+    """
+    pose = tracker.robot_pose
+    selected = [t for t in tracker.track_set.tracks if t.id == tracker.selected_id]
+    if not selected or pose is None:
+        return None
+    track = selected[0]
+    lens_m = robot_camera_pose(tracker.robot, pose.rail_m, pose.tilt_rad).position_m
+    return Target(
+        t=track.t_s,
+        track_id=track.id,
+        pos=tuple(float(x) for x in track.state[:_AXES]),
+        vel=tuple(float(x) for x in track.state[_AXES : 2 * _AXES]),
+        # The smoothed acceleration: the raw filter value is too noisy to extrapolate with.
+        acc=tuple(float(x) for x in track.smoothed_acceleration),
+        distance_m=float(np.linalg.norm(track.state[:_AXES] - lens_m)),
+        state=track.motion,
+        confidence=_confidence(tracker, track),
+        others=_others_in_view(tracker, track, pose),
+    )
+
+
+def apply_robot_pose(tracker: Tracker, datagram: bytes) -> None:
+    """Keep the newest `robot_pose`; anything else in the datagram is ignored.
+
+    Args:
+        tracker: Tracker, modified in place.
+        datagram: One UDP datagram from the robot.
+    """
+    try:
+        message = decode(datagram)
+    except ProtocolError:
+        return
+    newest = tracker.robot_pose
+    # UDP may reorder; the protocol orders messages by t, not by arrival.
+    if isinstance(message, RobotPose) and (newest is None or message.t > newest.t):
+        tracker.robot_pose = message
 
 
 def scene_message(config: Config) -> str:
@@ -232,7 +368,8 @@ def scene_message(config: Config) -> str:
         config: Configuration; positions in metres, arena frame.
 
     Returns:
-        The JSON text with arena size, prediction lead, cameras and nodes.
+        The JSON text with arena size, prediction lead, cameras, nodes and the port on
+        which the simulator streams the cinema view.
     """
     cameras = [
         {
@@ -252,6 +389,7 @@ def scene_message(config: Config) -> str:
             "arena_size_m": list(config.arena.size_m),
             "prediction_lead_s": config.tracker.prediction_lead_s,
             "min_cameras": config.tracker.min_cameras,
+            "cinema_port": config.ports.simulator_window,
             "cameras": cameras,
             "nodes": nodes,
         },
@@ -378,6 +516,7 @@ class _Session:
         tracker: The tracker.
         assembler: Groups detections messages into frames.
         log: Open track log file.
+        target_socket: UDP socket the `target` messages leave from.
         duration_s: Simulation duration to run for, or None.
         connections: Open control window connections.
         done: Set when the last frame of the duration was processed.
@@ -389,6 +528,7 @@ class _Session:
     tracker: Tracker
     assembler: FrameAssembler
     log: Any
+    target_socket: socket.socket
     duration_s: float | None
     connections: set[ServerConnection] = field(default_factory=set)
     done: asyncio.Event = field(default_factory=asyncio.Event)
@@ -430,7 +570,7 @@ def _snapshot(session: _Session, frame: Frame) -> str:
 
 
 def _handle_frame(session: _Session, frame: Frame) -> None:
-    """Track one frame, log it and broadcast a snapshot when it is due.
+    """Track one frame, log it, send `target` and broadcast a snapshot when it is due.
 
     Args:
         session: The running session.
@@ -440,6 +580,11 @@ def _handle_frame(session: _Session, frame: Frame) -> None:
     session.log.write(json.dumps(record, separators=(",", ":")) + "\n")
     # Each line is flushed so that the metrics can read the log while it grows.
     session.log.flush()
+    target = target_message(session.tracker)
+    if target is not None:
+        session.target_socket.sendto(
+            encode_target(target), (UDP_HOST, session.config.ports.target)
+        )
     session.last_handled = frame
     if _snapshot_due(session, frame):
         broadcast(session.connections, _snapshot(session, frame))
@@ -485,6 +630,27 @@ class _DetectionsProtocol(asyncio.DatagramProtocol):
             _handle_frame(self._session, frame)
 
 
+class _RobotPoseProtocol(asyncio.DatagramProtocol):
+    """Receives `robot_pose` datagrams on the event loop."""
+
+    def __init__(self, session: _Session) -> None:
+        """Create the protocol.
+
+        Args:
+            session: The running session.
+        """
+        self._session = session
+
+    def datagram_received(self, data: bytes, addr: Any) -> None:
+        """Hand one datagram to the tracker.
+
+        Args:
+            data: The datagram bytes.
+            addr: Sender address (unused).
+        """
+        apply_robot_pose(self._session.tracker, data)
+
+
 async def _control_window(session: _Session, connection: ServerConnection) -> None:
     """Serve one control window: send the scene, then apply its `select` messages.
 
@@ -513,8 +679,8 @@ async def _control_window(session: _Session, connection: ServerConnection) -> No
         session.connections.discard(connection)
 
 
-def _detections_socket(port: int) -> socket.socket:
-    """Open the UDP socket for detections.
+def _receive_socket(port: int) -> socket.socket:
+    """Open a UDP socket for incoming messages.
 
     Args:
         port: UDP port to bind on the local host.
@@ -529,7 +695,7 @@ def _detections_socket(port: int) -> socket.socket:
 
 
 async def _serve(session: _Session) -> None:
-    """Receive detections and serve the control window until the run is over.
+    """Receive detections and robot poses and serve the control window until the run is over.
 
     Args:
         session: The running session.
@@ -537,7 +703,11 @@ async def _serve(session: _Session) -> None:
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
         lambda: _DetectionsProtocol(session),
-        sock=_detections_socket(session.config.ports.detections),
+        sock=_receive_socket(session.config.ports.detections),
+    )
+    pose_transport, _ = await loop.create_datagram_endpoint(
+        lambda: _RobotPoseProtocol(session),
+        sock=_receive_socket(session.config.ports.robot_pose),
     )
     try:
         async with serve(
@@ -551,24 +721,37 @@ async def _serve(session: _Session) -> None:
             await session.done.wait()
     finally:
         transport.close()
+        pose_transport.close()
 
 
-def run(config: Config, log_path: Path, duration_s: float | None) -> None:
-    """Receive detections over UDP, write the track log and serve the control window.
+def run(
+    config: Config,
+    robot: Robot,
+    log_path: Path,
+    duration_s: float | None,
+    auto_select: bool,
+) -> None:
+    """Receive detections over UDP, write the track log, send `target`, serve the window.
 
     Args:
         config: Configuration.
+        robot: Robot description.
         log_path: File that gets one JSON line per processed frame.
         duration_s: Stop after the last frame before this simulation time (s), or None
             to run until interrupted.
+        auto_select: Select the oldest confirmed track whenever none is selected.
     """
     rate_hz = frame_rate_hz(config)
     assembler = FrameAssembler(
         [camera.id for camera in config.cameras], config.tracker.frame_timeout_frames / rate_hz
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as log:
-        session = _Session(config, create_tracker(config), assembler, log, duration_s)
+    tracker = create_tracker(config, robot, auto_select)
+    with (
+        open(log_path, "w", encoding="utf-8") as log,
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as target_socket,
+    ):
+        session = _Session(config, tracker, assembler, log, target_socket, duration_s)
         asyncio.run(_serve(session))
 
 
@@ -576,11 +759,20 @@ def main() -> None:
     """Parse the command line and run the tracker."""
     parser = argparse.ArgumentParser(description="Bee tracking server")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--robot", type=Path, default=DEFAULT_ROBOT_PATH, help="robot file")
+    parser.add_argument(
+        "--auto-select",
+        action="store_true",
+        help="select the oldest confirmed track whenever none is selected",
+    )
     parser.add_argument("--log", type=Path, default=DEFAULT_LOG_PATH, help="track log file")
     parser.add_argument("--duration", type=float, default=None, help="simulation seconds")
     args = parser.parse_args()
     try:
-        run(load_config(args.config), args.log, args.duration)
+        run(
+            load_config(args.config), load_robot(args.robot), args.log, args.duration,
+            args.auto_select,
+        )
     except KeyboardInterrupt:
         pass
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from experiments.metrics import MATCH_GATE_M, Metrics, compute_metrics
-from shared.config import Config, frame_rate_hz, last_frame_of, load_config
+from shared.config import Config, frame_rate_hz, last_frame_of, load_config, load_robot
 from shared.protocol import Detections, Truth, decode
 from simulator.main import create_simulation, step_simulation
 from tracker.main import create_tracker, process_frame
@@ -19,6 +19,7 @@ from tracker.receiver import FrameAssembler
 
 REPO = Path(__file__).parent.parent
 CONFIG = load_config(REPO / "config" / "default.yaml")
+ROBOT = load_robot(REPO / "config" / "robot.yaml")
 FORBIDDEN_PACKAGES = {"simulator", "robot_emulator"}
 # Modules that read the wall clock; the tracker may only use simulation time.
 CLOCK_MODULES = {"time", "datetime"}
@@ -38,12 +39,12 @@ def _imported_packages(path: Path) -> set[str]:
 
 def _run_offline(config: Config, seed: int, frames: int) -> tuple[list[dict[str, Any]], Metrics]:
     """Simulate and track in one process; return the track records and the metrics."""
-    simulation = create_simulation(config, seed, 1.0)
+    simulation = create_simulation(config, ROBOT, seed, 1.0)
     period_s = 1.0 / frame_rate_hz(config)
     assembler = FrameAssembler(
         [camera.id for camera in config.cameras], config.tracker.frame_timeout_frames * period_s
     )
-    tracker = create_tracker(config)
+    tracker = create_tracker(config, ROBOT)
     records: list[dict[str, Any]] = []
     truth: dict[int, dict[int, tuple[float, float, float]]] = {}
     for _ in range(frames):
@@ -109,10 +110,10 @@ def test_tracking_works_again_after_the_sender_restarts() -> None:
     assembler = FrameAssembler(
         [camera.id for camera in CONFIG.cameras], CONFIG.tracker.frame_timeout_frames * period_s
     )
-    tracker = create_tracker(CONFIG)
+    tracker = create_tracker(CONFIG, ROBOT)
     ids_before: set[int] = set()
     for run_index, frames in enumerate((120, 60)):
-        simulation = create_simulation(CONFIG, 1, 1.0)
+        simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
         records = []
         for _ in range(frames):
             for item in step_simulation(simulation):

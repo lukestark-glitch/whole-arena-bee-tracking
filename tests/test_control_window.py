@@ -15,7 +15,7 @@ import pytest
 from websockets.asyncio.client import ClientConnection, connect
 
 import tracker.main as main
-from shared.config import Config, frame_rate_hz, last_frame_of, load_config
+from shared.config import Config, frame_rate_hz, last_frame_of, load_config, load_robot
 from shared.protocol import Detections, decode, encode_detections
 from simulator.main import create_simulation, step_simulation
 from tracker.main import (
@@ -29,6 +29,7 @@ from tracker.main import (
 from tracker.receiver import Frame, FrameAssembler
 
 CONFIG = load_config(Path(__file__).parent.parent / "config" / "default.yaml")
+ROBOT = load_robot(Path(__file__).parent.parent / "config" / "robot.yaml")
 HOST = "127.0.0.1"
 TIMEOUT_S = 10.0  # generous, so a busy computer does not fail the test
 CONNECT_ATTEMPTS = 100
@@ -45,12 +46,12 @@ def _feed(frames: int, silent_cameras: frozenset[str] = frozenset()) -> tuple[Tr
     Returns:
         The tracker, the last processed frame and the assembler's last report times.
     """
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     period_s = 1.0 / frame_rate_hz(CONFIG)
     assembler = FrameAssembler(
         [camera.id for camera in CONFIG.cameras], CONFIG.tracker.frame_timeout_frames * period_s
     )
-    tracker = create_tracker(CONFIG)
+    tracker = create_tracker(CONFIG, ROBOT)
     last = None
     for _ in range(frames):
         for item in step_simulation(simulation):
@@ -167,10 +168,12 @@ def _running(tmp_path: Path) -> Iterator[Config]:
         CONFIG.ports,
         detections=_free_port(socket.SOCK_DGRAM),
         control_window=_free_port(socket.SOCK_STREAM),
+        robot_pose=_free_port(socket.SOCK_DGRAM),
     )
     config = dataclasses.replace(CONFIG, ports=ports)
     thread = threading.Thread(
-        target=main.run, args=(config, tmp_path / "tracks.jsonl", RUN_DURATION_S), daemon=True
+        target=main.run, args=(config, ROBOT, tmp_path / "tracks.jsonl", RUN_DURATION_S, False),
+        daemon=True,
     )
     thread.start()
     try:
@@ -203,7 +206,7 @@ async def _next_tracks(ws: ClientConnection) -> dict:
 
 async def _send_frames(config: Config, frames: int) -> None:
     """Send simulated detections datagrams to the tracker, yielding between frames."""
-    simulation = create_simulation(config, 1, 1.0)
+    simulation = create_simulation(config, ROBOT, 1, 1.0)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         for _ in range(frames):
             for item in step_simulation(simulation):
