@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 
 from experiments.listen_detections import summarise
-from shared.config import Config, frame_rate_hz, load_config
-from shared.protocol import UDP_HOST, Detections, Truth, decode
+from shared.config import Config, frame_rate_hz, load_config, load_robot
+from shared.protocol import UDP_HOST, Detections, RobotPose, Truth, decode
 from simulator.main import (
     Simulation,
     apply_control,
@@ -21,13 +21,14 @@ from simulator.main import (
 from simulator.nodes import Outgoing
 
 CONFIG = load_config(Path(__file__).parent.parent / "config" / "default.yaml")
+ROBOT = load_robot(Path(__file__).parent.parent / "config" / "robot.yaml")
 ROUNDING_M = 1e-4  # allowance for the encoder's rounding
 TIME_ROUNDING_S = 1e-6  # the encoder rounds t to microseconds
 
 
 def _frames(config: Config, seed: int, count: int) -> list[list[Outgoing]]:
     """Simulate a number of frames with a given seed."""
-    simulation = create_simulation(config, seed, 1.0)
+    simulation = create_simulation(config, ROBOT, seed, 1.0)
     return [step_simulation(simulation) for _ in range(count)]
 
 
@@ -35,7 +36,7 @@ def _frames_with_controls(
     seed: int, count: int, controls: dict[int, tuple[str, object]]
 ) -> list[list[Outgoing]]:
     """Simulate frames, applying a control before the frame whose number is its key."""
-    simulation = create_simulation(CONFIG, seed, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, seed, 1.0)
     frames = []
     for frame in range(count):
         if frame in controls:
@@ -66,17 +67,42 @@ def test_different_seed_differs() -> None:
 
 
 def test_frame_contents() -> None:
-    """Every frame has one truth with 10 bees and one detections per camera."""
+    """Every frame has one truth with 10 bees and robot axes, and one detections per camera."""
     camera_ids = {c.id for c in CONFIG.cameras}
     for frame, outgoing in enumerate(_frames(CONFIG, 1, 120)):
         messages = [decode(o.datagram) for o in outgoing]
         truths = [m for m in messages if isinstance(m, Truth)]
         detections = [m for m in messages if isinstance(m, Detections)]
         assert len(truths) == 1 and len(truths[0].bees) == 10
+        assert truths[0].robot is not None
         assert sorted(d.camera_id for d in detections) == sorted(camera_ids)
         expected_t = round(frame / 60, 6)
-        assert all(m.t == expected_t for m in messages)
+        assert all(m.t == expected_t for m in truths + detections)
         assert all(o.send_time_s >= expected_t - TIME_ROUNDING_S for o in outgoing)
+
+
+def test_robot_pose_at_control_rate() -> None:
+    """Two seconds of frames carry one robot_pose per control step, in time order."""
+    poses = [
+        decode(o.datagram)
+        for outgoing in _frames(CONFIG, 1, 120)
+        for o in outgoing
+        if o.port == CONFIG.ports.robot_pose
+    ]
+    assert len(poses) == round(2.0 * ROBOT.control.rate_hz)
+    assert all(isinstance(pose, RobotPose) for pose in poses)
+    assert [pose.t for pose in poses] == sorted(pose.t for pose in poses)
+    assert poses[-1].t == 2.0
+
+
+def test_robot_limit_control() -> None:
+    """A robot limit from the page replaces the value of the robot file; a bad one is refused."""
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
+    apply_control(simulation, "rail_max_speed_m_s", 0.7)
+    assert simulation.controller.robot.rail.max_speed == 0.7
+    assert simulation.controller.robot.tilt == ROBOT.tilt
+    with pytest.raises(ValueError):
+        apply_control(simulation, "tilt_max_acceleration_rad_s2", 0)
 
 
 def test_long_run_stays_in_arena_and_finite() -> None:
@@ -120,9 +146,11 @@ def test_end_to_end_udp() -> None:
             truth=truth_sock.getsockname()[1],
             detections=det_sock.getsockname()[1],
             simulator_window=_free_tcp_port(),
+            # Port 0 lets the system pick a free port to listen on for `target`.
+            target=0,
         )
         config = dataclasses.replace(CONFIG, ports=ports)
-        run(config, seed=1, duration_s=0.1, time_scale=1.0, fast=True)
+        run(config, ROBOT, seed=1, duration_s=0.1, time_scale=1.0, fast=True)
         assert len([truth_sock.recv(65535) for _ in range(6)]) == 6
         assert len([det_sock.recv(65535) for _ in range(96)]) == 96
 
@@ -150,7 +178,7 @@ def test_same_controls_same_output() -> None:
 
 def test_bee_count_changes_and_ids_are_not_reused() -> None:
     """Adding and removing bees changes the truth and a removed id never returns."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     apply_control(simulation, "bee_count", 12)
     assert _truth_ids(step_simulation(simulation)) == list(range(12))
     apply_control(simulation, "bee_count", 4)
@@ -161,7 +189,7 @@ def test_bee_count_changes_and_ids_are_not_reused() -> None:
 
 def test_max_speed_control() -> None:
     """After a new speed limit no bee is faster than it."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     apply_control(simulation, "max_speed_m_s", 0.3)
     step_simulation(simulation)
     assert all(np.linalg.norm(b.velocity_m_s) <= 0.3 + 1e-12 for b in simulation.bees)
@@ -169,7 +197,7 @@ def test_max_speed_control() -> None:
 
 def test_full_dropout_control() -> None:
     """With dropout probability 1 no detections report a bee."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     apply_control(simulation, "dropout_probability", 1)
     for _ in range(5):
         detections = [m for m in _step_one(simulation) if isinstance(m, Detections)]
@@ -178,13 +206,13 @@ def test_full_dropout_control() -> None:
 
 def test_seed_control_restarts() -> None:
     """A seed control makes the following frames equal to a fresh simulation."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     for _ in range(50):
         step_simulation(simulation)
     apply_control(simulation, "seed", 7)
     apply_control(simulation, "paused", True)
     assert simulation.paused and simulation.seed == 7
-    fresh = create_simulation(CONFIG, 7, 1.0)
+    fresh = create_simulation(CONFIG, ROBOT, 7, 1.0)
     assert [step_simulation(simulation) for _ in range(20)] == [
         step_simulation(fresh) for _ in range(20)
     ]
@@ -213,7 +241,7 @@ def test_stopped_node_sends_nothing_and_changes_nothing_else() -> None:
 
 def test_node_restart_brings_messages_back() -> None:
     """Starting a stopped node again makes it send again."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     apply_control(simulation, *_stop("node-03", True))
     assert "node-03" not in _node_ids(step_simulation(simulation))
     apply_control(simulation, *_stop("node-03", False))
@@ -222,7 +250,7 @@ def test_node_restart_brings_messages_back() -> None:
 
 def test_stopped_node_survives_seed_control() -> None:
     """A restart with a new seed keeps the stopped nodes."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     apply_control(simulation, *_stop("node-03", True))
     apply_control(simulation, "seed", 7)
     assert simulation.stopped_nodes == frozenset({"node-03"})
@@ -241,7 +269,7 @@ def test_stopped_node_survives_seed_control() -> None:
 )
 def test_invalid_node_stopped(value: object) -> None:
     """Unknown nodes, missing keys, non-bool flags and plain strings are refused."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     with pytest.raises(ValueError):
         apply_control(simulation, "node_stopped", value)
     assert simulation.stopped_nodes == frozenset()
@@ -262,7 +290,7 @@ def test_invalid_node_stopped(value: object) -> None:
 )
 def test_invalid_controls(name: str, value: object) -> None:
     """Invalid controls raise ValueError and change nothing."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     with pytest.raises(ValueError):
         apply_control(simulation, name, value)
     assert simulation.config == CONFIG
@@ -270,7 +298,7 @@ def test_invalid_controls(name: str, value: object) -> None:
 
 def test_controls_reject_values_that_would_stall_or_overflow() -> None:
     """Huge counts, huge speeds, tiny time scales and oversized integers are refused."""
-    simulation = create_simulation(CONFIG, 1, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
     for name, value in [
         ("bee_count", 10**8),
         ("max_speed_m_s", 1e308),
