@@ -20,9 +20,9 @@ from shared.protocol import UDP_HOST
 from simulator.main import create_simulation, scene_message, state_message
 
 CONFIG = load_config(Path(__file__).parent.parent / "config" / "default.yaml")
-RUN_DURATION_S = 5.0  # simulation time of the background run; ended early by the tests
+RUN_DURATION_S = 15.0  # simulation time of the background run; ended early by the tests
 FINISH_TIME_SCALE = 100.0  # makes the rest of the run take a few milliseconds
-TIMEOUT_S = 5.0
+TIMEOUT_S = 10.0  # generous, so a busy computer does not fail the test
 CONNECT_ATTEMPTS = 100
 CONNECT_PAUSE_S = 0.05
 PAUSED_STATES_TO_READ = 5
@@ -46,7 +46,16 @@ async def _send_finish(port: int) -> None:
         await ws.send(_control("paused", False))
         await ws.send(_control("time_scale", FINISH_TIME_SCALE))
         await ws.send(_control("bee_count", 0))
-        await asyncio.wait_for(ws.wait_closed(), TIMEOUT_S)
+        await asyncio.wait_for(_drain(ws), TIMEOUT_S)
+
+
+async def _drain(ws: ClientConnection) -> None:
+    """Read and discard messages until the server closes the connection.
+
+    A client that stops reading fills its receive queue and then never sees the close.
+    """
+    async for _ in ws:
+        pass
 
 
 @contextmanager

@@ -48,6 +48,9 @@ MIN_TIME_SCALE = 0.01
 MAX_TIME_SCALE = 100.0
 # Seeds are kept to 32 bits so that every browser and JSON parser carries them exactly.
 MAX_SEED = 2**32 - 1
+# The event loop cannot sleep much shorter than a millisecond; shorter waits are skipped,
+# otherwise a high time scale would be slowed down by its own pacing.
+MIN_SLEEP_S = 0.001
 # While paused the frame loop looks for a resume every 20 ms of wall time.
 PAUSE_POLL_S = 0.02
 
@@ -461,12 +464,14 @@ def _serve_page(connection: ServerConnection, request: Request) -> Response | No
 
 
 async def _sleep_until(deadline_s: float) -> None:
-    """Sleep until a monotonic clock time, yielding to the event loop at least once.
+    """Sleep until a monotonic clock time, unless it is less than MIN_SLEEP_S away.
 
     Args:
         deadline_s: Target time on `time.monotonic` (wall-clock s).
     """
-    await asyncio.sleep(max(0.0, deadline_s - time.monotonic()))
+    remaining_s = deadline_s - time.monotonic()
+    if remaining_s >= MIN_SLEEP_S:
+        await asyncio.sleep(remaining_s)
 
 
 def _apply_pending(simulation: Simulation, pending: list[str | bytes]) -> None:
@@ -520,8 +525,8 @@ async def _frame_loop(
             sock.sendto(item.datagram, (UDP_HOST, item.port))
         # A late frame (slow step, sleeping laptop) must not be made up for with a burst.
         frame_start_s = max(frame_start_s + period_s / simulation.time_scale, time.monotonic())
-        if fast:
-            await asyncio.sleep(0)
+        # Give the window server a turn in every frame, also when no wait was needed.
+        await asyncio.sleep(0)
 
 
 async def _snapshot_loop(simulation: Simulation, pages: set[ServerConnection]) -> None:
