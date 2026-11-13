@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from shared.config import Arena, Bees
 from simulator.bees import FLYING, SITTING, WALKING, Bee, create_bees, step_bees
@@ -99,3 +100,20 @@ def test_flight_rms_speed_is_near_flight_speed() -> None:
         if bee.state == FLYING
     ]
     assert 0.5 < np.sqrt(np.mean(speeds_sq)) < 1.5
+
+
+def test_walking_bee_velocity_matches_motion() -> None:
+    """A walking bee moves by velocity times dt, except in a step where it turns back."""
+    rng = np.random.default_rng(3)
+    bees = create_bees(SETTINGS, ARENA, rng)
+    checked = 0
+    for _ in range(3600):
+        before = {bee.id: bee.position_m.copy() for bee in bees if bee.state == WALKING}
+        step_bees(bees, SETTINGS, ARENA, DT_S, rng)
+        for bee in bees:
+            if bee.state == WALKING and bee.id in before:
+                moved_m = np.linalg.norm(bee.position_m - before[bee.id])
+                assert moved_m <= SETTINGS.walk_speed_m_s * DT_S + 1e-12
+                assert np.linalg.norm(bee.velocity_m_s) == pytest.approx(SETTINGS.walk_speed_m_s)
+                checked += 1
+    assert checked > 0

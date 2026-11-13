@@ -20,8 +20,7 @@ SITTING = "sitting"
 WALKING = "walking"
 FLYING = "flying"
 
-# Per-axis variance factor of the Ornstein-Uhlenbeck flight: the 3D mean square speed is
-# 3 * sigma^2 * tau / 2 per unit noise, so sigma^2 = 2 * v_rms^2 / (3 * tau).
+# Number of axes of the arena frame (x, y, z).
 _AXIS_COUNT = 3
 
 
@@ -45,6 +44,8 @@ class Bee:
 def _flight_sigma_m_s_per_sqrt_s(settings: Bees) -> float:
     """Return the noise strength of the flight velocity process.
 
+    Each axis of an Ornstein-Uhlenbeck process settles at a variance of
+    sigma^2 * tau / 2, so the mean square speed over three axes is 3 * sigma^2 * tau / 2.
     With sigma = v_rms * sqrt(2 / (3 * tau)) the long-run RMS speed equals v_rms.
 
     Args:
@@ -307,11 +308,29 @@ def _walk(
     velocity_m_s = np.zeros(_AXIS_COUNT)
     velocity_m_s[in_plane[0]] = settings.walk_speed_m_s * np.cos(heading_rad)
     velocity_m_s[in_plane[1]] = settings.walk_speed_m_s * np.sin(heading_rad)
-    wall_coordinate_m = bee.position_m[axis]
-    position_m = np.clip(bee.position_m + velocity_m_s * dt_s, 0.0, size_m)
-    position_m[axis] = wall_coordinate_m
-    bee.position_m = position_m
+    bee.position_m = bee.position_m + velocity_m_s * dt_s
     bee.velocity_m_s = velocity_m_s
+    for in_plane_axis in in_plane:
+        _turn_back_at_edge(bee, in_plane_axis, size_m)
+
+
+def _turn_back_at_edge(bee: Bee, axis: int, size_m: np.ndarray) -> None:
+    """Mirror a walking bee back onto its wall where it crossed the wall's edge.
+
+    Turning back keeps the reported velocity true to the motion; a bee clamped at the
+    edge would stand still while still reporting its walking speed.
+
+    Args:
+        bee: Walking bee, modified in place.
+        axis: In-plane axis to check.
+        size_m: Arena size, shape (3,), arena frame, metres.
+    """
+    coordinate_m = bee.position_m[axis]
+    if 0.0 <= coordinate_m <= size_m[axis]:
+        return
+    edge_m = 0.0 if coordinate_m < 0.0 else size_m[axis]
+    bee.position_m[axis] = 2.0 * edge_m - coordinate_m
+    bee.velocity_m_s[axis] = -bee.velocity_m_s[axis]
 
 
 def _heading_rad(
