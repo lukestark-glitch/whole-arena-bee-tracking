@@ -65,6 +65,40 @@ Defined in `docs/protocol.md`.
   `target` to its own exposure time.
 - The cinema camera's frame rate is independent of all of this.
 
+## Robot parameters: known and missing
+
+The emulator reads all robot values from `config/robot.yaml`. Values marked `assumed` there
+should be replaced as soon as real ones are known.
+
+Known from the videos:
+
+| Parameter | Value |
+| --- | --- |
+| First rail base | Extruded aluminium, about 4 ft (1.2 m) |
+| Rail drive | Timing belt with glass-fibre core, 50:1 gearbox, motor with encoder |
+| Later rail | Commercial linear rail, smaller and lighter |
+| Axes | Rail, tilt, focus motor |
+| Cinema lens | 180 mm macro at 1.5× magnification |
+| Stereo camera | 2.2 mm lenses, 105° rectified field of view, 50 mm baseline, bee at about 150 mm |
+| Tracking rate | about 32 Hz full image, about 60 Hz in the search window |
+| Focus update rate | 20 Hz |
+| Dead zone | 2 to 3 mm |
+| Tilt flex | almost 2°, about 7 mm at 200 mm |
+
+Missing and to be asked for:
+
+- Length of travel of the current rail
+- Maximum speed and acceleration of the rail
+- Maximum speed and acceleration of the tilt axis, and its range
+- Maximum speed of the focus motor and the focus range
+- Moving mass of the carriage with camera
+- Delay from stereo exposure to motor command
+- Position of the rail and the lens reference point relative to the arena
+
+For scale: a bee reversing from +5 m/s to −5 m/s in 50 ms needs about 200 m/s². The rail
+will not reach that, which is why prediction matters and why the simulation should test a
+range of limits.
+
 ## What the emulator simplifies
 
 | Real robot | Emulator |
