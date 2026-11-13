@@ -40,6 +40,14 @@ SNAPSHOT_RATE_HZ = 30
 POSITION_DECIMALS = 4
 # Simulation time in `state` messages is rounded to microseconds, like the UDP messages.
 TIME_DECIMALS = 6
+# Limits for controls from the page. They keep a wrong value from stalling the frame loop
+# (too many bees, a time scale near zero) or from producing numbers JSON cannot carry.
+MAX_BEE_COUNT = 200
+MAX_SPEED_LIMIT_M_S = 20.0
+MIN_TIME_SCALE = 0.01
+MAX_TIME_SCALE = 100.0
+# Seeds are kept to 32 bits so that every browser and JSON parser carries them exactly.
+MAX_SEED = 2**32 - 1
 # While paused the frame loop looks for a resume every 20 ms of wall time.
 PAUSE_POLL_S = 0.02
 
@@ -166,27 +174,35 @@ def _number(name: str, value: object) -> float:
     Raises:
         ValueError: If the value is not a finite number.
     """
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number, got {value!r}")
+    try:
+        number = float(value)
+    except OverflowError as error:
+        # JSON allows integers of any length; one too large for a float is not a setting.
+        raise ValueError(f"{name} is too large") from error
+    if not math.isfinite(number):
         raise ValueError(f"{name} must be a finite number, got {value!r}")
-    return float(value)
+    return number
 
 
-def _integer(name: str, value: object, minimum: int) -> int:
-    """Check that a control value is an integer of at least a minimum.
+def _integer(name: str, value: object, minimum: int, maximum: int) -> int:
+    """Check that a control value is an integer inside a range.
 
     Args:
         name: Control name, for the error message.
         value: Value received.
         minimum: Smallest allowed value.
+        maximum: Largest allowed value.
 
     Returns:
         The value.
 
     Raises:
-        ValueError: If the value is not an int (bool excluded) or is below the minimum.
+        ValueError: If the value is not an int (bool excluded) or is outside the range.
     """
-    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}")
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be an integer from {minimum} to {maximum}, got {value!r}")
     return value
 
 
@@ -195,12 +211,12 @@ def _set_bee_count(simulation: Simulation, value: object) -> None:
 
     Args:
         simulation: Simulation, modified in place.
-        value: New number of bees (integer >= 0).
+        value: New number of bees (integer from 0 to MAX_BEE_COUNT).
 
     Raises:
-        ValueError: If the value is not an integer >= 0.
+        ValueError: If the value is not such an integer.
     """
-    count = _integer("bee_count", value, 0)
+    count = _integer("bee_count", value, 0, MAX_BEE_COUNT)
     config = simulation.config
     del simulation.bees[count:]
     while len(simulation.bees) < count:
@@ -211,18 +227,20 @@ def _set_bee_count(simulation: Simulation, value: object) -> None:
 
 
 def _set_max_speed(simulation: Simulation, value: object) -> None:
-    """Set the bee speed limit (m/s, > 0).
+    """Set the bee speed limit (m/s, above 0 and at most MAX_SPEED_LIMIT_M_S).
 
     Args:
         simulation: Simulation, modified in place.
         value: New limit.
 
     Raises:
-        ValueError: If the value is not a number > 0.
+        ValueError: If the value is not a number in that range.
     """
     speed_m_s = _number("max_speed_m_s", value)
-    if speed_m_s <= 0.0:
-        raise ValueError(f"max_speed_m_s must be > 0, got {value!r}")
+    if not 0.0 < speed_m_s <= MAX_SPEED_LIMIT_M_S:
+        raise ValueError(
+            f"max_speed_m_s must be above 0 and at most {MAX_SPEED_LIMIT_M_S}, got {value!r}"
+        )
     simulation.config = replace(
         simulation.config, bees=replace(simulation.config.bees, max_speed_m_s=speed_m_s)
     )
@@ -281,18 +299,20 @@ def _set_paused(simulation: Simulation, value: object) -> None:
 
 
 def _set_time_scale(simulation: Simulation, value: object) -> None:
-    """Set the simulation seconds per wall-clock second (> 0).
+    """Set the simulation seconds per wall-clock second.
 
     Args:
         simulation: Simulation, modified in place.
-        value: New time scale.
+        value: New time scale, from MIN_TIME_SCALE to MAX_TIME_SCALE.
 
     Raises:
-        ValueError: If the value is not a number > 0.
+        ValueError: If the value is not a number in that range.
     """
     time_scale = _number("time_scale", value)
-    if time_scale <= 0.0:
-        raise ValueError(f"time_scale must be > 0, got {value!r}")
+    if not MIN_TIME_SCALE <= time_scale <= MAX_TIME_SCALE:
+        raise ValueError(
+            f"time_scale must be from {MIN_TIME_SCALE} to {MAX_TIME_SCALE}, got {value!r}"
+        )
     simulation.time_scale = time_scale
 
 
@@ -301,12 +321,12 @@ def _restart(simulation: Simulation, value: object) -> None:
 
     Args:
         simulation: Simulation, modified in place; `paused` and `time_scale` are kept.
-        value: New seed (integer >= 0).
+        value: New seed (integer from 0 to MAX_SEED).
 
     Raises:
-        ValueError: If the value is not an integer >= 0.
+        ValueError: If the value is not such an integer.
     """
-    seed = _integer("seed", value, 0)
+    seed = _integer("seed", value, 0, MAX_SEED)
     fresh = create_simulation(simulation.config, seed, simulation.time_scale)
     simulation.seed = fresh.seed
     simulation.rng = fresh.rng
@@ -449,8 +469,27 @@ async def _sleep_until(deadline_s: float) -> None:
     await asyncio.sleep(max(0.0, deadline_s - time.monotonic()))
 
 
+def _apply_pending(simulation: Simulation, pending: list[str | bytes]) -> None:
+    """Apply and clear the control messages received since the last frame.
+
+    Args:
+        simulation: Simulation, modified in place.
+        pending: Raw WebSocket messages in order of arrival; emptied here.
+    """
+    for raw in pending:
+        try:
+            _apply_message(simulation, raw)
+        except ValueError as error:
+            print(f"ignored message from page: {error}", file=sys.stderr)
+    pending.clear()
+
+
 async def _frame_loop(
-    simulation: Simulation, sock: socket.socket, duration_s: float | None, fast: bool
+    simulation: Simulation,
+    pending: list[str | bytes],
+    sock: socket.socket,
+    duration_s: float | None,
+    fast: bool,
 ) -> None:
     """Produce frames and send their datagrams until the duration is over.
 
@@ -460,6 +499,8 @@ async def _frame_loop(
 
     Args:
         simulation: Simulation, modified in place.
+        pending: Control messages from the pages, applied only between frames so that a
+            frame is never sent half with old and half with new settings.
         sock: UDP socket.
         duration_s: Simulation time to run (s), or None to run until interrupted.
         fast: Send as fast as possible, no pacing.
@@ -467,6 +508,7 @@ async def _frame_loop(
     period_s = 1.0 / frame_rate_hz(simulation.config)
     frame_start_s = time.monotonic()
     while duration_s is None or simulation.frame * period_s < duration_s:
+        _apply_pending(simulation, pending)
         if simulation.paused:
             await asyncio.sleep(PAUSE_POLL_S)
             frame_start_s = time.monotonic()
@@ -476,7 +518,8 @@ async def _frame_loop(
             if not fast:
                 await _sleep_until(frame_start_s + (item.send_time_s - t_s) / simulation.time_scale)
             sock.sendto(item.datagram, (UDP_HOST, item.port))
-        frame_start_s += period_s / simulation.time_scale
+        # A late frame (slow step, sleeping laptop) must not be made up for with a burst.
+        frame_start_s = max(frame_start_s + period_s / simulation.time_scale, time.monotonic())
         if fast:
             await asyncio.sleep(0)
 
@@ -507,17 +550,15 @@ async def _serve(
     """
     simulation = create_simulation(config, seed, time_scale)
     pages: set[ServerConnection] = set()
+    pending: list[str | bytes] = []
 
     async def handle_page(connection: ServerConnection) -> None:
-        """Send the scene, then apply the controls the page sends."""
+        """Send the scene, then queue the controls the page sends for the frame loop."""
         await connection.send(scene_message(simulation.config))
         pages.add(connection)
         try:
             async for raw in connection:
-                try:
-                    _apply_message(simulation, raw)
-                except ValueError as error:
-                    print(f"ignored message from page: {error}", file=sys.stderr)
+                pending.append(raw)
         finally:
             pages.discard(connection)
 
@@ -527,7 +568,7 @@ async def _serve(
         snapshots = asyncio.create_task(_snapshot_loop(simulation, pages))
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                await _frame_loop(simulation, sock, duration_s, fast)
+                await _frame_loop(simulation, pending, sock, duration_s, fast)
         finally:
             snapshots.cancel()
 

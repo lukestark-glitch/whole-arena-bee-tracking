@@ -209,3 +209,16 @@ def test_invalid_controls(name: str, value: object) -> None:
     with pytest.raises(ValueError):
         apply_control(simulation, name, value)
     assert simulation.config == CONFIG
+
+
+def test_controls_reject_values_that_would_stall_or_overflow() -> None:
+    """Huge counts, huge speeds, tiny time scales and oversized integers are refused."""
+    simulation = create_simulation(CONFIG, 1, 1.0)
+    for name, value in [
+        ("bee_count", 10**8),
+        ("max_speed_m_s", 1e308),
+        ("time_scale", 1e-9),
+        ("pixel_sigma_px", 10**400),
+    ]:
+        with pytest.raises(ValueError):
+            apply_control(simulation, name, value)

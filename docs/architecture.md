@@ -136,12 +136,12 @@ Page → simulator, one message per change:
 
 | `name` | `value` | Effect |
 | --- | --- | --- |
-| `bee_count` | int, 0 or more | Bees are added (new ids) or the newest are removed |
-| `max_speed_m_s` | float above 0 | Speed limit of all bees |
+| `bee_count` | int, 0 to 200 | Bees are added (new ids) or the newest are removed |
+| `max_speed_m_s` | float above 0, at most 20 | Speed limit of all bees |
 | `pixel_sigma_px` | float, 0 or more | Pixel noise of all cameras |
 | `dropout_probability` | float 0..1 | Chance that a detection is missed |
 | `paused` | bool | Simulation time stops, no UDP messages are sent |
-| `time_scale` | float above 0 | Simulation seconds per second of wall time |
+| `time_scale` | float, 0.01 to 100 | Simulation seconds per second of wall time |
 | `seed` | int | Restart at frame 0 with this seed and the current settings |
 
 A change takes effect at the start of the next frame. An invalid message is ignored.

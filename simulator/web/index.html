@@ -266,6 +266,7 @@ function updatePanel(msg) {
     if ($(`v-${name}`)) $(`v-${name}`).textContent = formatValue(name, v);
   }
   if (msg.settings.bee_count !== undefined) setWidget("bee_count_num", msg.settings.bee_count);
+  setWidget("seed", msg.seed);
   $("paused").textContent = msg.paused ? "Resume" : "Pause";
 }
 
