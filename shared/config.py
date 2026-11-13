@@ -261,12 +261,13 @@ def _check_camera_membership(
         ConfigError: Naming a camera in no node or in several nodes.
     """
     for camera in cameras:
-        holders = [n.id for n in nodes if camera.id in n.camera_ids]
+        # Count every listing, so a camera named twice by one node is caught too.
+        holders = [n.id for n in nodes for c in n.camera_ids if c == camera.id]
         if not holders:
             raise ConfigError(f"camera '{camera.id}' belongs to no node")
         if len(holders) > 1:
             raise ConfigError(
-                f"camera '{camera.id}' belongs to more than one node: "
+                f"camera '{camera.id}' is listed more than once in the nodes: "
                 f"{', '.join(holders)}"
             )
 
@@ -327,6 +328,31 @@ def _parse_ports(raw: Any) -> Ports:
     )
 
 
+def _parse(raw: Any) -> Config:
+    """Build a Config from the parsed YAML document, without consistency checks.
+
+    Args:
+        raw: Parsed YAML document, expected to be a mapping.
+
+    Returns:
+        The configuration. Lengths are in metres, angles in radians.
+
+    Raises:
+        ConfigError: If a key is missing or a vector is malformed.
+    """
+    arena_raw = _require(raw, "arena", "top level")
+    models_raw = _require(raw, "camera_models", "top level")
+    return Config(
+        seed=int(_require(raw, "seed", "top level")),
+        arena=Arena(size_m=_vec3(_require(arena_raw, "size_m", "arena"), "arena size_m")),
+        camera_models={k: _parse_camera_model(k, v) for k, v in models_raw.items()},
+        cameras=tuple(_parse_camera(c) for c in _require(raw, "cameras", "top level")),
+        nodes=tuple(_parse_node(n) for n in _require(raw, "nodes", "top level")),
+        noise=_parse_noise(_require(raw, "noise", "top level")),
+        ports=_parse_ports(_require(raw, "ports", "top level")),
+    )
+
+
 def load_config(path: Path) -> Config:
     """Read, parse and validate a configuration file.
 
@@ -337,22 +363,18 @@ def load_config(path: Path) -> Config:
         The validated configuration. Lengths are in metres, angles in radians.
 
     Raises:
-        ConfigError: If a key is missing or the content is inconsistent.
+        ConfigError: If a key is missing, a value has the wrong type or the content
+            is inconsistent.
     """
     with open(path, encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
-    models_raw = _require(raw, "camera_models", "top level")
-    config = Config(
-        seed=int(_require(raw, "seed", "top level")),
-        arena=Arena(
-            size_m=_vec3(_require(_require(raw, "arena", "top level"), "size_m", "arena"),
-                         "arena size_m")
-        ),
-        camera_models={k: _parse_camera_model(k, v) for k, v in models_raw.items()},
-        cameras=tuple(_parse_camera(c) for c in _require(raw, "cameras", "top level")),
-        nodes=tuple(_parse_node(n) for n in _require(raw, "nodes", "top level")),
-        noise=_parse_noise(_require(raw, "noise", "top level")),
-        ports=_parse_ports(_require(raw, "ports", "top level")),
-    )
+    try:
+        config = _parse(raw)
+    except ConfigError:
+        raise
+    except (TypeError, ValueError, AttributeError) as error:
+        # A wrong value type (text where a number belongs, a list where a mapping
+        # belongs) must reach the user as a config problem, not as a bare traceback.
+        raise ConfigError(f"invalid value in {path}: {error}") from error
     _validate(config)
     return config

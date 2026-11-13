@@ -95,7 +95,7 @@ def test_camera_in_no_node(tmp_path: Path) -> None:
 
 def test_camera_in_two_nodes(tmp_path: Path) -> None:
     """A camera held by two nodes is rejected and named."""
-    with pytest.raises(ConfigError, match="camera 'cam-01' belongs to more than one"):
+    with pytest.raises(ConfigError, match="camera 'cam-01' is listed more than once"):
         _load_broken(tmp_path, lambda r: r["nodes"][1].update(cameras=["cam-01", "cam-04"]))
 
 
@@ -114,3 +114,23 @@ def test_missing_key_names_key_and_section(tmp_path: Path) -> None:
         _load_broken(
             tmp_path, lambda r: r["camera_models"]["pi_gs_imx296"].pop("rate_hz")
         )
+
+
+def test_camera_listed_twice_in_one_node(tmp_path: Path) -> None:
+    """A node that names the same camera twice is rejected with the camera id."""
+
+    def mutate(raw: dict[str, Any]) -> None:
+        raw["nodes"][0]["cameras"] = ["cam-01", "cam-01"]
+
+    with pytest.raises(ConfigError, match="cam-01"):
+        _load_broken(tmp_path, mutate)
+
+
+def test_non_numeric_value(tmp_path: Path) -> None:
+    """Text where a number belongs fails as a ConfigError that shows the value."""
+
+    def mutate(raw: dict[str, Any]) -> None:
+        raw["noise"]["pixel_sigma_px"] = "fast"
+
+    with pytest.raises(ConfigError, match="fast"):
+        _load_broken(tmp_path, mutate)

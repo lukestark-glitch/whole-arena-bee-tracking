@@ -167,3 +167,19 @@ def test_decode_missing_field() -> None:
     """A missing field raises ProtocolError naming the field."""
     with pytest.raises(ProtocolError, match="focus_m"):
         decode(b'{"type":"robot_pose","v":1,"t":0,"rail_m":0,"tilt_rad":0}')
+
+
+def test_oversized_entry_after_split_raises() -> None:
+    """An entry too large for a datagram of its own is an error, also after a split."""
+    bees = (
+        TruthBee(0, (0.1, 0.1, 0.1), (0.0, 0.0, 0.0), "flying"),
+        TruthBee(1, (0.1, 0.1, 0.1), (0.0, 0.0, 0.0), "x" * 2000),
+    )
+    with pytest.raises(ProtocolError, match="exceeds"):
+        encode_truth(Truth(frame=1, t=0.0, bees=bees))
+
+
+def test_decode_type_not_a_string() -> None:
+    """A type field that is not a string is reported as an unknown type."""
+    with pytest.raises(ProtocolError, match="unknown message type"):
+        decode(b'{"v":1,"type":[]}')

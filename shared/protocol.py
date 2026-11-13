@@ -190,6 +190,19 @@ def _dumps(fields: dict[str, Any]) -> bytes:
     return json.dumps(fields, separators=(",", ":")).encode("utf-8")
 
 
+def _fits(fields: dict[str, Any], lists: dict[str, list[Any]]) -> bool:
+    """Tell whether a message with these lists stays below the datagram limit.
+
+    Args:
+        fields: Scalar message fields.
+        lists: Named lists of JSON-compatible entries.
+
+    Returns:
+        True if the encoded datagram is shorter than MAX_DATAGRAM_BYTES.
+    """
+    return len(_dumps({**fields, **lists})) < MAX_DATAGRAM_BYTES
+
+
 def _pack(fields: dict[str, Any], lists: dict[str, list[Any]]) -> list[bytes]:
     """Spread list entries greedily over as few datagrams as possible.
 
@@ -213,14 +226,13 @@ def _pack(fields: dict[str, Any], lists: dict[str, list[Any]]) -> list[bytes]:
         for entry in entries:
             trial = {k: [*v] for k, v in current.items()}
             trial.setdefault(key, []).append(entry)
-            if len(_dumps({**fields, **trial})) < MAX_DATAGRAM_BYTES:
-                current = trial
-                continue
-            if not any(current.values()):
-                raise ProtocolError(f"a single {key} entry exceeds the datagram limit")
-            datagrams.append(_dumps({**fields, **current}))
-            current = {first_key: []}
-            current.setdefault(key, []).append(entry)
+            if not _fits(fields, trial):
+                datagrams.append(_dumps({**fields, **current}))
+                # For the first list both keys are the same and the entry wins.
+                trial = {first_key: [], key: [entry]}
+                if not _fits(fields, trial):
+                    raise ProtocolError(f"a single {key} entry exceeds the datagram limit")
+            current = trial
     datagrams.append(_dumps({**fields, **current}))
     return datagrams
 
@@ -479,7 +491,8 @@ def decode(datagram: bytes) -> Message:
         raise ProtocolError("message must be a JSON object")
     if d.get("v") != PROTOCOL_VERSION:
         raise ProtocolError(f"unsupported protocol version: {d.get('v')!r}")
-    decoder = _DECODERS.get(d.get("type"))
+    message_type = d.get("type")
+    decoder = _DECODERS.get(message_type) if isinstance(message_type, str) else None
     if decoder is None:
         raise ProtocolError(f"unknown message type: {d.get('type')!r}")
     try:
