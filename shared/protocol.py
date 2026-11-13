@@ -21,6 +21,9 @@ PROTOCOL_VERSION = 1
 # (1500 byte MTU minus IP and UDP headers, with margin) and is never fragmented.
 MAX_DATAGRAM_BYTES = 1400
 
+# docs/protocol.md fixes the transport to UDP on localhost.
+UDP_HOST = "127.0.0.1"
+
 # Sender rounding keeps datagrams small; sub-pixel and sub-0.1 mm detail is noise.
 PIXEL_DECIMALS = 2  # u, v and blob size, in pixels
 METRE_DECIMALS = 4  # positions and distances, in metres

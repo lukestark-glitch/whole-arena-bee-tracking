@@ -110,6 +110,21 @@ noise:
   node_delay_s: 0.008             # mean camera-node processing delay
   node_delay_jitter_s: 0.002      # standard deviation of that delay
 
+# Simulated bees. Flight is a random velocity that keeps its direction for about
+# flight_direction_time_s; a bee lands only where it touches a wall.
+bees:
+  count: 10
+  body_length_m: 0.015
+  max_speed_m_s: 5.0
+  flight_speed_m_s: 1.0             # typical (root mean square) speed
+  flight_direction_time_s: 0.5
+  walk_speed_m_s: 0.03
+  walk_turn_rad_per_sqrt_s: 1.0
+  landing_probability: 0.2          # per wall contact
+  takeoff_rate_hz: 0.2
+  sit_to_walk_rate_hz: 0.3
+  walk_to_sit_rate_hz: 0.3
+
 # UDP ports.
 ports:
   detections: 5005    # camera nodes to tracker
