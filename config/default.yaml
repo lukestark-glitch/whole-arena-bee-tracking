@@ -120,14 +120,15 @@ bees:
   flight_direction_time_s: 0.5
   walk_speed_m_s: 0.03
   walk_turn_rad_per_sqrt_s: 1.0
-  landing_probability: 0.2          # per wall contact
+  landing_probability: 0.05         # per wall contact
   takeoff_rate_hz: 0.2
   sit_to_walk_rate_hz: 0.3
   walk_to_sit_rate_hz: 0.3
 
-# UDP ports.
+# Ports: UDP for the messages, TCP for the browser window.
 ports:
   detections: 5005    # camera nodes to tracker
   target: 5006        # tracker to robot
   robot_pose: 5007    # robot to tracker
   truth: 5008         # simulator to metrics only
+  simulator_window: 8765   # page and WebSocket of the simulator window (TCP)

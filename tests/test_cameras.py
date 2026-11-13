@@ -78,3 +78,37 @@ def test_noisy_points_stay_inside_image() -> None:
         for u_px, v_px, _ in observe_bees(POSE, MODEL, edge_bee, BODY_LENGTH_M, noisy, rng):
             assert 0.0 <= u_px < MODEL.width_px
             assert 0.0 <= v_px < MODEL.height_px
+
+
+def _single_size_px() -> float:
+    """Blob size of one bee at 0.5 m (px)."""
+    return focal_length_px(MODEL) * BODY_LENGTH_M / 0.5
+
+
+def _observe_quiet(bees: list[Bee]) -> tuple[tuple[float, float, float], ...]:
+    """Observe bees without noise."""
+    return observe_bees(POSE, MODEL, bees, BODY_LENGTH_M, QUIET, np.random.default_rng(0))
+
+
+def test_touching_bees_merge() -> None:
+    """Two bees 2 mm apart give one blob at the mean position, sqrt(2) times as big."""
+    bees = [_bee(0, 0.5, 0.0), _bee(1, 0.5, 0.002)]
+    got = _observe_quiet(bees)
+    expected = project(POSE, MODEL, np.array([b.position_m for b in bees])).mean(axis=0)
+    assert len(got) == 1
+    np.testing.assert_allclose(got[0][:2], expected, atol=1e-3)
+    np.testing.assert_allclose(got[0][2], np.sqrt(2.0) * _single_size_px(), rtol=1e-3)
+
+
+def test_separate_bees_stay_separate() -> None:
+    """Two bees 10 cm apart give two blobs."""
+    assert len(_observe_quiet([_bee(0, 0.5, 0.0), _bee(1, 0.5, 0.1)])) == 2
+
+
+def test_chain_of_touching_bees_merges() -> None:
+    """A touches B, B touches C, A does not touch C: still one blob."""
+    gap_m = 0.010  # at 0.5 m one blob is about 20 px wide, so 10 mm apart touches, 20 mm not
+    bees = [_bee(0, 0.5, 0.0), _bee(1, 0.5, gap_m), _bee(2, 0.5, 2.0 * gap_m)]
+    assert len(_observe_quiet(bees[:2])) == 1
+    assert len(_observe_quiet([bees[0], bees[2]])) == 2
+    assert len(_observe_quiet(bees)) == 1

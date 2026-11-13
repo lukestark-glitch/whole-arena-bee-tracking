@@ -58,6 +58,26 @@ def _flight_sigma_m_s_per_sqrt_s(settings: Bees) -> float:
     return settings.flight_speed_m_s * np.sqrt(2.0 / (_AXIS_COUNT * tau_s))
 
 
+def create_bee(bee_id: int, settings: Bees, arena: Arena, rng: np.random.Generator) -> Bee:
+    """Create one flying bee at a random position with a stationary flight velocity.
+
+    Args:
+        bee_id: Identifier of the new bee.
+        settings: Bee settings.
+        arena: Arena whose box (arena frame, metres) holds the bee.
+        rng: Seeded random generator.
+
+    Returns:
+        A FLYING bee; position in the arena frame (m), velocity in m/s.
+    """
+    size_m = np.asarray(arena.size_m, dtype=float)
+    axis_std_m_s = settings.flight_speed_m_s / np.sqrt(_AXIS_COUNT)
+    position_m = rng.uniform(0.0, 1.0, _AXIS_COUNT) * size_m
+    velocity_m_s = rng.normal(0.0, axis_std_m_s, _AXIS_COUNT)
+    velocity_m_s = _limit_speed(velocity_m_s, settings.max_speed_m_s)
+    return Bee(bee_id, position_m, velocity_m_s, FLYING)
+
+
 def create_bees(settings: Bees, arena: Arena, rng: np.random.Generator) -> list[Bee]:
     """Create flying bees at random positions with stationary flight velocities.
 
@@ -69,15 +89,7 @@ def create_bees(settings: Bees, arena: Arena, rng: np.random.Generator) -> list[
     Returns:
         ``settings.count`` bees with ids 0..count-1, all FLYING.
     """
-    size_m = np.asarray(arena.size_m, dtype=float)
-    axis_std_m_s = settings.flight_speed_m_s / np.sqrt(_AXIS_COUNT)
-    bees = []
-    for bee_id in range(settings.count):
-        position_m = rng.uniform(0.0, 1.0, _AXIS_COUNT) * size_m
-        velocity_m_s = rng.normal(0.0, axis_std_m_s, _AXIS_COUNT)
-        velocity_m_s = _limit_speed(velocity_m_s, settings.max_speed_m_s)
-        bees.append(Bee(bee_id, position_m, velocity_m_s, FLYING))
-    return bees
+    return [create_bee(bee_id, settings, arena, rng) for bee_id in range(settings.count)]
 
 
 def step_bees(
