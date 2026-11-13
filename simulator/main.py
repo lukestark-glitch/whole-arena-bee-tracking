@@ -656,7 +656,10 @@ def apply_target(simulation: Simulation, datagram: bytes) -> None:
         message = decode(datagram)
     except ProtocolError:
         return
-    if isinstance(message, Target):
+    now_s = simulation.frame / frame_rate_hz(simulation.config)
+    # A target from the future is a leftover of the run before a restart; taking it in
+    # would shadow every target of the new run.
+    if isinstance(message, Target) and message.t <= now_s:
         receive_target(simulation.controller, message)
 
 

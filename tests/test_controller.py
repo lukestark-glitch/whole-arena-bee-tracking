@@ -73,7 +73,8 @@ def _run(
             late_pos, late_vel = bee_at(t_s - FRAME_S)
             others = ()
             if intruder_at is not None and report_intruder:
-                others = (OtherBee(2, tuple(intruder_at(t_s - FRAME_S)[0])),)
+                other_pos, other_vel = intruder_at(t_s - FRAME_S)
+                others = (OtherBee(2, tuple(other_pos), tuple(other_vel)),)
             receive_target(controller, _target(t_s - FRAME_S, late_pos, late_vel, others))
         if intruder_at is not None:
             positions.append(intruder_at(t_s)[0])
@@ -188,3 +189,23 @@ def test_older_target_is_dropped_and_a_new_track_resets_the_lock() -> None:
     controller.locked = True
     receive_target(controller, replace(newest, t=1.1, track_id=2))
     assert not controller.locked
+
+
+def test_lock_is_dropped_after_a_silence() -> None:
+    """A target that follows a silence longer than the timeout starts with a focus preset."""
+    controller = create_controller(ROBOT)
+    receive_target(controller, _target(1.0, np.array([0.4, 0.1, 0.1]), np.zeros(3)))
+    controller.locked = True
+    late_s = 1.0 + 2.0 * ROBOT.control.target_timeout_s
+    receive_target(controller, _target(late_s, np.array([0.4, 0.1, 0.1]), np.zeros(3)))
+    assert not controller.locked
+
+
+def test_target_from_the_future_is_not_followed() -> None:
+    """A target later than the present (left over from before a restart) is not used."""
+    controller = create_controller(ROBOT)
+    receive_target(controller, _target(50.0, np.array([0.8, 0.15, 0.25]), np.zeros(3)))
+    before = pose_message(controller, 0.0)
+    for step in range(100):
+        step_controller(controller, (step + 1) * STEP_S, STEP_S)
+    assert pose_message(controller, 0.0) == before

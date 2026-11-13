@@ -68,7 +68,8 @@ Defined in `docs/protocol.md`.
 ## Robot parameters: known and missing
 
 The emulator reads all robot values from `config/robot.yaml`. Values marked `assumed` there
-should be replaced as soon as real ones are known.
+should be replaced as soon as real ones are known. Another file can be selected with
+`--robot PATH` (simulator, tracker and metrics must get the same one).
 
 Known from the videos:
 
@@ -107,3 +108,15 @@ range of limits.
 | Motor drives and mechanics | Axes with speed and acceleration limits, no vibration or flex |
 | Lens focus curve | Focus set directly as a distance |
 | Cinema image | Rendered view with blur by distance from the focus plane |
+| Delay from stereo exposure to motor command | None: a blob is used in the control step of its exposure |
+| Mode from `state` (dead zone, focus rate) | Not emulated: the same control for sitting and flying bees |
+| Home position | Every axis starts in the middle of its travel |
+
+How the emulator reads two of the rules:
+
+- *Distance must match.* The expected distance is recomputed from the extrapolated position
+  and the robot's present pose. It is the same quantity as `distance_m`, made current.
+- *Not explained by another bee.* A blob is rejected when a bee in `others` is expected
+  nearer to it in the image than the target.
+- *Fallback.* The last accepted stereo measurement is kept as an offset to the prediction
+  (centring and focus), so the robot follows the prediction and keeps the last trend.

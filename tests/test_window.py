@@ -212,3 +212,23 @@ def test_http_page(page_exists: bool, tmp_path: Path, monkeypatch: pytest.Monkey
         status, body = _get(port)
     assert status == (200 if page_exists else 404)
     assert (body == page.read_bytes()) if page_exists else body
+
+
+def test_cinema_images_are_relayed_to_viewers() -> None:
+    """A binary message from the page reaches a client connected to the cinema path."""
+    image = b"\xff\xd8 not a real image \xff\xd9"
+
+    async def session(port: int) -> None:
+        page = await _connect(port)
+        async with page, connect(f"ws://{UDP_HOST}:{port}{main.CINEMA_PATH}") as viewer:
+            received = None
+            while received != image:
+                # The viewer may register a moment after the first image; send until it shows.
+                await page.send(image)
+                try:
+                    received = await asyncio.wait_for(viewer.recv(), CONNECT_PAUSE_S)
+                except TimeoutError:
+                    pass
+
+    with _running() as port:
+        asyncio.run(asyncio.wait_for(session(port), TIMEOUT_S))

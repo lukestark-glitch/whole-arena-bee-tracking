@@ -10,10 +10,19 @@ import pytest
 
 from experiments.listen_detections import summarise
 from shared.config import Config, frame_rate_hz, load_config, load_robot
-from shared.protocol import UDP_HOST, Detections, RobotPose, Truth, decode
+from shared.protocol import (
+    UDP_HOST,
+    Detections,
+    RobotPose,
+    Target,
+    Truth,
+    decode,
+    encode_target,
+)
 from simulator.main import (
     Simulation,
     apply_control,
+    apply_target,
     create_simulation,
     run,
     step_simulation,
@@ -307,3 +316,15 @@ def test_controls_reject_values_that_would_stall_or_overflow() -> None:
     ]:
         with pytest.raises(ValueError):
             apply_control(simulation, name, value)
+
+
+def test_target_of_an_earlier_run_is_ignored() -> None:
+    """After a restart a target with a later time than the present does not reach the robot."""
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
+    target = Target(
+        5.0, 1, (0.4, 0.1, 0.1), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.3, "flying", 1.0, ()
+    )
+    apply_target(simulation, encode_target(target))
+    assert simulation.controller.target is None
+    apply_target(simulation, encode_target(dataclasses.replace(target, t=0.0)))
+    assert simulation.controller.target is not None

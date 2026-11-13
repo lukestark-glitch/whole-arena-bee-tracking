@@ -89,7 +89,7 @@ Sent by the tracker to the robot while a bee is selected, at the tracker's outpu
   "distance_m": 0.2140,
   "state": "flying",
   "confidence": 0.93,
-  "others": [{"track_id": 7, "pos": [0.4301, 0.1100, 0.1650]}]
+  "others": [{"track_id": 7, "pos": [0.4301, 0.1100, 0.1650], "vel": [-0.20, 0.00, 0.10]}]
 }
 ```
 
@@ -97,18 +97,20 @@ Sent by the tracker to the robot while a bee is selected, at the tracker's outpu
 | --- | --- | --- |
 | `t` | float, s | The time for which `pos` is valid. The robot extrapolates with `vel` and `acc` to any later time it needs. |
 | `track_id` | int | ID of the selected bee. |
-| `pos`, `vel`, `acc` | `[x, y, z]` | State of the bee at time `t`, in m, m/s, m/s². |
+| `pos`, `vel`, `acc` | `[x, y, z]` | State of the bee at time `t`, in m, m/s, m/s². `acc` is the smoothed acceleration (time constant `acceleration_smoothing_s`). |
 | `distance_m` | float | Distance from the robot's lens reference point to `pos`, from the last known `robot_pose`. |
 | `state` | `"sitting"` or `"flying"` | Derived from speed. Lets the robot switch dead zone and focus rate. |
 | `confidence` | float 0..1 | Share of expected cameras that currently confirm the track. |
-| `others` | list | Other tracked bees expected inside the robot's field of view at time `t`. May be empty. |
+| `others` | list | Other confirmed tracks expected inside the robot's stereo image at time `t`, computed from the last `robot_pose`. Each has `track_id`, `pos` and `vel` at time `t`, so the robot can extrapolate them like the target. At most 8, those nearest to the target in the image first. May be empty. |
 
-When no bee is selected the tracker sends nothing. The robot treats a silence longer than
+When no bee is selected the tracker sends nothing. It also sends nothing before the first
+`robot_pose` has arrived, because `distance_m` cannot be computed without one. The robot treats a silence longer than
 0.5 s as "no target".
 
 ## `robot_pose`
 
-Sent by the robot at its control rate.
+Sent by the robot at its control rate (default 500 Hz). `t` is the time the axis positions
+are valid for.
 
 ```json
 {"type": "robot_pose", "v": 1, "t": 17.380000, "rail_m": 0.3920, "tilt_rad": 0.1100, "focus_m": 0.2150}
@@ -139,10 +141,11 @@ simulator window. The tracker must never read it.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `bees` | list | One entry per bee: `id` (int), `pos` and `vel` as `[x, y, z]`, `state` (`"sitting"`, `"walking"` or `"flying"`). |
-| `robot` | object | Optional. True robot axes, same fields as `robot_pose`. Omitted while no robot is simulated. |
+| `robot` | object | Optional. True robot axes at time `t`, same fields as `robot_pose`. Omitted while no robot is simulated. |
 
 ## Change log of the protocol
 
 | Version | Change |
 | --- | --- |
 | 1 | First version. |
+| 1 | Stage 5, before any release: entries of `others` also carry `vel`. |
