@@ -3,7 +3,8 @@
 How the parts fit together and how they talk to each other. Update this file whenever a
 component or a channel changes. Message fields are defined in `docs/protocol.md`.
 
-Status: design. Nothing is implemented yet. Each section notes the stage that builds it.
+Status: `shared/config.py` and `shared/protocol.py` are built (Stage 0). Everything else is
+design. Each section notes the stage that builds it.
 
 ## Overview
 
@@ -34,13 +35,13 @@ the tracker.
 
 ## Components
 
-### `shared/` (Stage 0)
+### `shared/` (Stages 0 and 1)
 
 Code both programs need, and nothing else.
 
 - `config.py`: loads and validates `config/*.yaml` into dataclasses.
 - `protocol.py`: builds and parses the messages of `docs/protocol.md`.
-- `geometry.py`: camera model. Projects a 3D point to a pixel and turns a pixel into a ray.
+- `geometry.py` (Stage 1): camera model. Projects a 3D point to a pixel and turns a pixel into a ray.
   The simulator uses projection, the tracker uses rays, so both share one implementation of
   the lens model.
 

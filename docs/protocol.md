@@ -7,12 +7,23 @@ change this file first.
 
 - UDP on localhost, one JSON object per datagram, UTF-8.
 - Every message has `type` (string) and `v` (protocol version, currently `1`).
-- A datagram must stay below 1400 bytes so it fits in one Ethernet frame. If a message
-  would exceed that, the sender splits the list it carries over several messages.
+- A datagram must stay below 1400 bytes so it fits in one Ethernet frame. If a `detections`
+  or `truth` message would exceed that, the sender splits the lists it carries over several
+  messages. Every part repeats all other fields (same `frame`, `t` and `camera_id`), and the
+  receiver joins the lists of the parts. `target` and `robot_pose` are never split: a
+  message that would be too large is an error at the sender.
 - UDP gives no delivery guarantee. Receivers must tolerate lost, late and reordered
   messages. Order is decided by the `t` field, never by arrival order.
 - JSON was chosen for readability (see `docs/decisions.md`, D2). Numbers are rounded by the
-  sender: pixels to 0.01, metres to 0.0001, seconds to 0.000001.
+  sender:
+
+  | Quantity | Rounded to |
+  | --- | --- |
+  | Pixels (`u`, `v`, blob `size`) | 0.01 |
+  | Metres (`pos`, `distance_m`, `rail_m`, `focus_m`) | 0.0001 |
+  | Seconds (`t`) | 0.000001 |
+  | Velocity, acceleration, `tilt_rad` | 0.0001 |
+  | `confidence` | 0.01 |
 
 ## Ports
 
@@ -124,6 +135,11 @@ simulator window. The tracker must never read it.
   "robot": {"rail_m": 0.392, "tilt_rad": 0.11, "focus_m": 0.215}
 }
 ```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `bees` | list | One entry per bee: `id` (int), `pos` and `vel` as `[x, y, z]`, `state` (`"sitting"`, `"walking"` or `"flying"`). |
+| `robot` | object | Optional. True robot axes, same fields as `robot_pose`. Omitted while no robot is simulated. |
 
 ## Change log of the protocol
 

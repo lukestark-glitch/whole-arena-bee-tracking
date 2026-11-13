@@ -1,0 +1,118 @@
+# Default configuration: arena, cameras, nodes, noise and ports.
+# Units: metres, seconds, radians, pixels. Positions are in the arena frame
+# (right-handed, x along the long side, y away from the robot, z up).
+
+# Seed for the single numpy random generator; same seed and config give the same run.
+seed: 1
+
+# Flight arena: a box from the origin to size_m.
+arena:
+  size_m: [0.90, 0.30, 0.30]        # x, y, z
+
+# Camera models; cameras refer to them by id.
+camera_models:
+  pi_gs_imx296:
+    width_px: 1456
+    height_px: 1088
+    fov_horizontal_rad: 1.919862    # 110 degrees
+    rate_hz: 60
+
+# 16 cameras: four per long edge of the arena, all aimed at the arena centre.
+cameras:
+  - id: cam-01
+    model: pi_gs_imx296
+    position_m: [0.00, 0.00, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-02
+    model: pi_gs_imx296
+    position_m: [0.30, 0.00, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-03
+    model: pi_gs_imx296
+    position_m: [0.60, 0.00, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-04
+    model: pi_gs_imx296
+    position_m: [0.90, 0.00, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-05
+    model: pi_gs_imx296
+    position_m: [0.00, 0.30, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-06
+    model: pi_gs_imx296
+    position_m: [0.30, 0.30, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-07
+    model: pi_gs_imx296
+    position_m: [0.60, 0.30, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-08
+    model: pi_gs_imx296
+    position_m: [0.90, 0.30, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-09
+    model: pi_gs_imx296
+    position_m: [0.00, 0.00, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-10
+    model: pi_gs_imx296
+    position_m: [0.30, 0.00, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-11
+    model: pi_gs_imx296
+    position_m: [0.60, 0.00, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-12
+    model: pi_gs_imx296
+    position_m: [0.90, 0.00, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-13
+    model: pi_gs_imx296
+    position_m: [0.00, 0.30, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-14
+    model: pi_gs_imx296
+    position_m: [0.30, 0.30, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-15
+    model: pi_gs_imx296
+    position_m: [0.60, 0.30, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-16
+    model: pi_gs_imx296
+    position_m: [0.90, 0.30, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+
+# 8 camera nodes; each Raspberry Pi holds two neighbouring cameras on one edge.
+nodes:
+  - id: node-01
+    cameras: [cam-01, cam-02]
+  - id: node-02
+    cameras: [cam-03, cam-04]
+  - id: node-03
+    cameras: [cam-05, cam-06]
+  - id: node-04
+    cameras: [cam-07, cam-08]
+  - id: node-05
+    cameras: [cam-09, cam-10]
+  - id: node-06
+    cameras: [cam-11, cam-12]
+  - id: node-07
+    cameras: [cam-13, cam-14]
+  - id: node-08
+    cameras: [cam-15, cam-16]
+
+# Detection noise and node latency applied by the simulator.
+noise:
+  pixel_sigma_px: 0.5             # Gaussian image noise per axis
+  dropout_probability: 0.02       # chance a visible bee is missed in a frame
+  node_delay_s: 0.008             # mean camera-node processing delay
+  node_delay_jitter_s: 0.002      # standard deviation of that delay
+
+# UDP ports.
+ports:
+  detections: 5005    # camera nodes to tracker
+  target: 5006        # tracker to robot
+  robot_pose: 5007    # robot to tracker
+  truth: 5008         # simulator to metrics only
