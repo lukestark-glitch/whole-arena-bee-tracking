@@ -16,17 +16,16 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from http import HTTPStatus
 from pathlib import Path
 
 import numpy as np
 from websockets.asyncio.server import ServerConnection, broadcast, serve
-from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
 
 from shared.config import Config, frame_rate_hz, load_config
 from shared.geometry import CameraPose, camera_pose
 from shared.protocol import UDP_HOST, Truth, TruthBee, encode_truth
+from shared.web import page_response
 from simulator.bees import Bee, create_bee, create_bees, step_bees
 from simulator.cameras import observe_bees
 from simulator.nodes import Outgoing, node_messages
@@ -443,7 +442,7 @@ def _apply_message(simulation: Simulation, raw: str | bytes) -> None:
 
 
 def _serve_page(connection: ServerConnection, request: Request) -> Response | None:
-    """Answer a plain HTTP GET with the page; let WebSocket upgrades through.
+    """Answer a plain HTTP GET with the simulator page; let WebSocket upgrades through.
 
     Args:
         connection: The connection (used to build the response).
@@ -452,15 +451,7 @@ def _serve_page(connection: ServerConnection, request: Request) -> Response | No
     Returns:
         A response for a plain GET, None for a WebSocket upgrade.
     """
-    if "Upgrade" in request.headers:
-        return None
-    if not PAGE_PATH.is_file():
-        return connection.respond(HTTPStatus.NOT_FOUND, "Simulator page not found\n")
-    body = PAGE_PATH.read_bytes()
-    headers = Headers(
-        [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(body)))]
-    )
-    return Response(HTTPStatus.OK.value, HTTPStatus.OK.phrase, headers, body)
+    return page_response(connection, request, PAGE_PATH)
 
 
 async def _sleep_until(deadline_s: float) -> None:

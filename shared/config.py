@@ -129,6 +129,12 @@ class TrackerSettings:
             axis, in m/s^2.
         flying_above_m_s: A sitting track becomes flying above this speed, in m/s.
         sitting_below_m_s: A flying track becomes sitting below this speed, in m/s.
+        acceleration_smoothing_s: Time constant of the smoothed acceleration shown for a
+            track, in seconds.
+        prediction_lead_s: How far ahead the predicted position shown in the control
+            window lies, in seconds.
+        node_silent_after_s: A node counts as stopped when none of its cameras has
+            reported for this long, in seconds of simulation time.
     """
 
     frame_timeout_frames: float
@@ -147,6 +153,9 @@ class TrackerSettings:
     initial_acceleration_sigma_m_s2: float
     flying_above_m_s: float
     sitting_below_m_s: float
+    acceleration_smoothing_s: float
+    prediction_lead_s: float
+    node_silent_after_s: float
 
 
 # Tracker settings that are whole numbers; all others are floats.
@@ -162,6 +171,7 @@ class Ports:
     robot_pose: int
     truth: int
     simulator_window: int
+    control_window: int
 
 
 @dataclass(frozen=True)
@@ -500,6 +510,7 @@ def _parse_ports(raw: Any) -> Ports:
         robot_pose=int(_require(raw, "robot_pose", "ports")),
         truth=int(_require(raw, "truth", "ports")),
         simulator_window=int(_require(raw, "simulator_window", "ports")),
+        control_window=int(_require(raw, "control_window", "ports")),
     )
 
 

@@ -143,6 +143,9 @@ tracker:
   initial_acceleration_sigma_m_s2: 20.0
   flying_above_m_s: 0.15            # sitting -> flying above this speed
   sitting_below_m_s: 0.05           # flying -> sitting below this speed
+  acceleration_smoothing_s: 0.2     # time constant of the acceleration shown for a track
+  prediction_lead_s: 0.1            # how far ahead the shown predicted position lies
+  node_silent_after_s: 0.5          # a node without reports for this long counts as stopped
 
 # Ports: UDP for the messages, TCP for the browser window.
 ports:
@@ -151,3 +154,4 @@ ports:
   robot_pose: 5007    # robot to tracker
   truth: 5008         # simulator to metrics only
   simulator_window: 8765   # page and WebSocket of the simulator window (TCP)
+  control_window: 8766     # page and WebSocket of the control window (TCP)
