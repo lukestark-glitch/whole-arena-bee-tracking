@@ -1,17 +1,21 @@
 """Load and validate the YAML configuration files in ``config/``.
 
-This is the only module that reads configuration. It turns a YAML file into
-frozen dataclasses that the simulator and the tracker use. All positions are in
-the arena frame: right-handed, x along the long side, y away from the robot,
-z up, in metres.
+This is the only module that reads configuration. It turns ``config/default.yaml``
+(`load_config`) and the robot file ``config/robot.yaml`` (`load_robot`) into
+frozen dataclasses that the simulator, the robot emulator and the tracker use. All
+positions are in the arena frame: right-handed, x along the long side, y away from the
+robot, z up, in metres.
 """
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import yaml
+
+_Parsed = TypeVar("_Parsed")
 
 # A Raspberry Pi 5 has two camera ports, so a node can serve at most two cameras.
 MAX_CAMERAS_PER_NODE = 2
@@ -187,6 +191,103 @@ class Config:
     bees: Bees
     tracker: TrackerSettings
     ports: Ports
+
+
+@dataclass(frozen=True)
+class AxisLimits:
+    """Travel and motion limits of one robot axis.
+
+    The unit depends on the axis: metres for rail and focus, radians for tilt.
+
+    Attributes:
+        lower: Smallest position (m or rad).
+        upper: Largest position (m or rad).
+        max_speed: Largest speed (m/s or rad/s).
+        max_acceleration: Largest acceleration (m/s^2 or rad/s^2).
+    """
+
+    lower: float
+    upper: float
+    max_speed: float
+    max_acceleration: float
+
+
+@dataclass(frozen=True)
+class Cinema:
+    """The robot's cinema camera.
+
+    Attributes:
+        fov_horizontal_rad: Horizontal field of view (rad).
+        aspect_ratio: Image width divided by image height.
+        depth_of_field_m: Total depth around the focus plane that counts as sharp (m).
+    """
+
+    fov_horizontal_rad: float
+    aspect_ratio: float
+    depth_of_field_m: float
+
+
+@dataclass(frozen=True)
+class StereoCamera:
+    """The robot's stereo camera pair, treated as one rectified image.
+
+    Attributes:
+        model: Image size (px), field of view (rad) and rate (Hz).
+        baseline_m: Distance between the two lenses (m).
+        pixel_sigma_px: Noise of a blob position per image axis (px).
+        size_sigma_px: Noise of a blob diameter (px).
+        disparity_sigma_px: Stereo matching noise (px); it becomes the distance noise.
+    """
+
+    model: CameraModel
+    baseline_m: float
+    pixel_sigma_px: float
+    size_sigma_px: float
+    disparity_sigma_px: float
+
+
+@dataclass(frozen=True)
+class RobotControl:
+    """Settings of the robot's control software.
+
+    Attributes:
+        rate_hz: Rate of the axis control and of `robot_pose` (Hz).
+        search_window_px: Half side of the square search window in the stereo image (px).
+        distance_tolerance_m: Largest difference between a blob's measured distance and
+            the expected one (m).
+        target_timeout_s: Silence of `target` after which the robot holds position (s).
+    """
+
+    rate_hz: float
+    search_window_px: float
+    distance_tolerance_m: float
+    target_timeout_s: float
+
+
+@dataclass(frozen=True)
+class Robot:
+    """Complete validated robot description from ``config/robot.yaml``.
+
+    Attributes:
+        rail_start_m: Tilt axis at rail position 0, arena frame (m). The rail runs along +x.
+        lens_offset_m: Lens reference point ahead of the tilt axis along the optical
+            axis (m).
+        rail: Rail limits (m, m/s, m/s^2); position counts from ``rail_start_m``.
+        tilt: Tilt limits (rad, rad/s, rad/s^2); 0 = horizontal, positive = up.
+        focus: Focus limits as distance of the focus plane (m, m/s, m/s^2).
+        cinema: Cinema camera.
+        stereo: Stereo camera.
+        control: Control software settings.
+    """
+
+    rail_start_m: tuple[float, float, float]
+    lens_offset_m: float
+    rail: AxisLimits
+    tilt: AxisLimits
+    focus: AxisLimits
+    cinema: Cinema
+    stereo: StereoCamera
+    control: RobotControl
 
 
 def _require(mapping: Any, key: str, section: str) -> Any:
@@ -541,6 +642,145 @@ def _parse(raw: Any) -> Config:
     )
 
 
+def _floats(raw: Any, names: tuple[str, ...], section: str) -> list[float]:
+    """Read several numbers from one section.
+
+    Args:
+        raw: Parsed YAML mapping.
+        names: Keys to read, in order.
+        section: Section name used in the error message.
+
+    Returns:
+        The values as floats, in the order of ``names``.
+
+    Raises:
+        ConfigError: If a key is missing.
+    """
+    return [float(_require(raw, name, section)) for name in names]
+
+
+def _parse_axis(raw: Any, section: str, lower: str | None, upper: str, unit: str) -> AxisLimits:
+    """Build the limits of one robot axis.
+
+    Args:
+        raw: Parsed YAML mapping of the axis.
+        section: Section name: rail, tilt or focus.
+        lower: Key of the smallest position, or None when the axis starts at 0.
+        upper: Key of the largest position.
+        unit: Unit suffix of the speed and acceleration keys: ``m`` or ``rad``.
+
+    Returns:
+        The limits, in the unit of the axis.
+
+    Raises:
+        ConfigError: If a key is missing, the range is empty or a limit is not positive.
+    """
+    low = 0.0 if lower is None else float(_require(raw, lower, section))
+    high, speed, acceleration = _floats(
+        raw, (upper, f"max_speed_{unit}_s", f"max_acceleration_{unit}_s2"), section
+    )
+    if not low < high:
+        raise ConfigError(f"section '{section}': the range of travel is empty")
+    if speed <= 0.0 or acceleration <= 0.0:
+        raise ConfigError(f"section '{section}': speed and acceleration limits must be above 0")
+    return AxisLimits(low, high, speed, acceleration)
+
+
+def _parse_stereo(raw: Any) -> StereoCamera:
+    """Build StereoCamera from the ``stereo`` section.
+
+    Args:
+        raw: Parsed YAML mapping.
+
+    Returns:
+        The stereo camera (pixels, radians, metres).
+
+    Raises:
+        ConfigError: If a key is missing.
+    """
+    model = CameraModel(
+        id="stereo",
+        width_px=int(_require(raw, "width_px", "stereo")),
+        height_px=int(_require(raw, "height_px", "stereo")),
+        fov_horizontal_rad=float(_require(raw, "fov_horizontal_rad", "stereo")),
+        rate_hz=float(_require(raw, "rate_hz", "stereo")),
+    )
+    names = ("baseline_m", "pixel_sigma_px", "size_sigma_px", "disparity_sigma_px")
+    return StereoCamera(model, *_floats(raw, names, "stereo"))
+
+
+def _parse_robot(raw: Any) -> Robot:
+    """Build a Robot from the parsed YAML document.
+
+    Args:
+        raw: Parsed YAML document, expected to be a mapping.
+
+    Returns:
+        The robot description. Lengths in metres, angles in radians.
+
+    Raises:
+        ConfigError: If a key is missing or a value is out of range.
+    """
+    rail_raw = _require(raw, "rail", "top level")
+    cinema_names = ("fov_horizontal_rad", "aspect_ratio", "depth_of_field_m")
+    control_names = ("rate_hz", "search_window_px", "distance_tolerance_m", "target_timeout_s")
+    robot = Robot(
+        rail_start_m=_vec3(_require(rail_raw, "start_m", "rail"), "rail start_m"),
+        lens_offset_m=float(_require(_require(raw, "lens", "top level"), "offset_m", "lens")),
+        rail=_parse_axis(rail_raw, "rail", None, "length_m", "m"),
+        tilt=_parse_axis(_require(raw, "tilt", "top level"), "tilt", "min_rad", "max_rad", "rad"),
+        focus=_parse_axis(_require(raw, "focus", "top level"), "focus", "min_m", "max_m", "m"),
+        cinema=Cinema(*_floats(_require(raw, "cinema", "top level"), cinema_names, "cinema")),
+        stereo=_parse_stereo(_require(raw, "stereo", "top level")),
+        control=RobotControl(
+            *_floats(_require(raw, "control", "top level"), control_names, "control")
+        ),
+    )
+    if robot.control.rate_hz <= 0.0 or robot.stereo.model.rate_hz <= 0.0:
+        raise ConfigError("control rate_hz and stereo rate_hz must be above 0")
+    return robot
+
+
+def _load(path: Path, parse: Callable[[Any], _Parsed]) -> _Parsed:
+    """Read a YAML file and parse it, turning wrong value types into ConfigError.
+
+    Args:
+        path: Path to the YAML file.
+        parse: Builds the result from the parsed YAML document.
+
+    Returns:
+        What ``parse`` returns.
+
+    Raises:
+        ConfigError: If a key is missing or a value has the wrong type.
+    """
+    with open(path, encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle)
+    try:
+        return parse(raw)
+    except ConfigError:
+        raise
+    except (TypeError, ValueError, AttributeError) as error:
+        # A wrong value type (text where a number belongs, a list where a mapping
+        # belongs) must reach the user as a config problem, not as a bare traceback.
+        raise ConfigError(f"invalid value in {path}: {error}") from error
+
+
+def load_robot(path: Path) -> Robot:
+    """Read, parse and validate a robot file.
+
+    Args:
+        path: Path to a YAML file such as ``config/robot.yaml``.
+
+    Returns:
+        The validated robot description. Lengths in metres, angles in radians.
+
+    Raises:
+        ConfigError: If a key is missing, a value has the wrong type or is out of range.
+    """
+    return _load(path, _parse_robot)
+
+
 def load_config(path: Path) -> Config:
     """Read, parse and validate a configuration file.
 
@@ -554,15 +794,6 @@ def load_config(path: Path) -> Config:
         ConfigError: If a key is missing, a value has the wrong type or the content
             is inconsistent.
     """
-    with open(path, encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle)
-    try:
-        config = _parse(raw)
-    except ConfigError:
-        raise
-    except (TypeError, ValueError, AttributeError) as error:
-        # A wrong value type (text where a number belongs, a list where a mapping
-        # belongs) must reach the user as a config problem, not as a bare traceback.
-        raise ConfigError(f"invalid value in {path}: {error}") from error
+    config = _load(path, _parse)
     _validate(config)
     return config

@@ -1,0 +1,59 @@
+# Camera robot parameters. Copy this file to compare robot variants and select the copy
+# with `--robot PATH`.
+# Units: metres, seconds, radians, pixels. Positions are in the arena frame
+# (right-handed, x along the long side and the rail, y away from the robot, z up).
+# Every value names its source:
+#   video    = stated in Jeremy Fielding's videos (see docs/robot-interface.md)
+#   assumed  = a guess, to be replaced by a real value
+#   measured = measured on the robot (add date and who measured it)
+
+# Linear rail. It runs along +x. The carriage position rail_m counts from start_m.
+rail:
+  start_m: [0.0, -0.15, 0.15]       # m, tilt axis at rail_m = 0; assumed
+  length_m: 0.90                    # m, travel; assumed (first rail in the video: about 1.2 m)
+  max_speed_m_s: 2.0                # m/s; assumed
+  max_acceleration_m_s2: 20.0       # m/s^2; assumed
+
+# Tilt axis. It is parallel to the rail and moves with the carriage. 0 = camera looks
+# along +y (horizontal), positive = up.
+tilt:
+  min_rad: -0.8                     # rad; assumed
+  max_rad: 0.8                      # rad; assumed
+  max_speed_rad_s: 10.0             # rad/s; assumed
+  max_acceleration_rad_s2: 200.0    # rad/s^2; assumed
+
+# Focus, as the distance from the lens reference point to the focus plane.
+focus:
+  min_m: 0.10                       # m; assumed
+  max_m: 0.60                       # m; assumed
+  max_speed_m_s: 1.0                # m/s, speed of the focus plane; assumed
+  max_acceleration_m_s2: 20.0       # m/s^2; assumed
+
+# Lens reference point: where distances and both robot cameras are measured from.
+lens:
+  offset_m: 0.0                     # m, ahead of the tilt axis along the optical axis; assumed
+
+# Cinema camera (180 mm macro at 1.5x magnification; video).
+cinema:
+  fov_horizontal_rad: 0.096         # rad; assumed (24 mm wide field seen from 0.25 m)
+  aspect_ratio: 1.7778              # width / height; assumed (16:9)
+  depth_of_field_m: 0.002           # m, total depth that counts as sharp; assumed
+
+# Stereo camera pair on the robot, treated as one rectified image with a measured
+# distance per blob.
+stereo:
+  width_px: 1280                    # px; assumed
+  height_px: 800                    # px; assumed
+  fov_horizontal_rad: 1.832596      # rad, 105 degrees rectified; video
+  rate_hz: 60                       # Hz, rate inside the search window; video
+  baseline_m: 0.05                  # m; video
+  pixel_sigma_px: 0.5               # px, noise of the blob position per axis; assumed
+  size_sigma_px: 0.5                # px, noise of the blob diameter; assumed
+  disparity_sigma_px: 0.25          # px, matching noise that becomes distance noise; assumed
+
+# Control software of the robot.
+control:
+  rate_hz: 500                      # Hz, axis control and robot_pose rate; assumed
+  search_window_px: 80.0            # px, half side of the square search window; assumed
+  distance_tolerance_m: 0.03        # m, a blob this far from distance_m is rejected; assumed
+  target_timeout_s: 0.5             # s, hold position after this silence; docs/protocol.md
