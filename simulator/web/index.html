@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bee Simulator Window</title>
+<style>
+  :root {
+    --bg: #f3f4f6; --panel: #ffffffee; --text: #1f2933; --muted: #6b7280;
+    --border: #d1d5db; --accent: #2563eb; --canvas: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1b2027ee; --text: #e5e7eb; --muted: #9ca3af;
+      --border: #374151; --accent: #60a5fa; --canvas: #14181d;
+    }
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #panel { position: fixed; left: 0; top: 0; bottom: 0; width: 280px; box-sizing: border-box;
+    padding: 12px 14px; overflow-y: auto; background: var(--panel);
+    border-right: 1px solid var(--border); backdrop-filter: blur(6px); }
+  h1 { font-size: 16px; margin: 0 0 8px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+    margin: 14px 0 6px; }
+  .row { margin: 8px 0; }
+  .row label { display: flex; justify-content: space-between; }
+  .row .val { font-variant-numeric: tabular-nums; color: var(--muted); }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+  input[type=number] { width: 70px; padding: 3px 5px; background: transparent; color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; }
+  button { padding: 5px 10px; background: var(--accent); color: #fff; border: 0;
+    border-radius: 4px; cursor: pointer; font: inherit; }
+  .inline { display: flex; gap: 8px; align-items: center; }
+  #status { font-weight: 600; }
+  #status.ok { color: #16a34a; } #status.bad { color: #dc2626; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td:last-child { text-align: right; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="panel">
+  <h1>Simulator window</h1>
+  <div>Server: <span id="status" class="bad">disconnected</span></div>
+
+  <h2>Readout</h2>
+  <table>
+    <tr><td>Time t</td><td id="ro-t">0.00 s</td></tr>
+    <tr><td>Frame</td><td id="ro-frame">0</td></tr>
+    <tr><td>Flying</td><td id="ro-flying">0</td></tr>
+    <tr><td>Walking</td><td id="ro-walking">0</td></tr>
+    <tr><td>Sitting</td><td id="ro-sitting">0</td></tr>
+  </table>
+  <div class="legend row">
+    <span><i class="dot" style="background:#f97316"></i>flying</span>
+    <span><i class="dot" style="background:#2563eb"></i>walking</span>
+    <span><i class="dot" style="background:#9ca3af"></i>sitting</span>
+  </div>
+
+  <h2>Controls</h2>
+  <div class="row">
+    <label for="bee_count_num">Bees</label>
+    <div class="inline">
+      <input type="number" id="bee_count_num" min="0" max="40" step="1">
+      <input type="range" id="bee_count" min="0" max="40" step="1">
+    </div>
+  </div>
+  <div class="row"><label for="max_speed_m_s">Max speed <span class="val" id="v-max_speed_m_s"></span></label>
+    <input type="range" id="max_speed_m_s" min="0.1" max="5" step="0.1"></div>
+  <div class="row"><label for="pixel_sigma_px">Pixel noise <span class="val" id="v-pixel_sigma_px"></span></label>
+    <input type="range" id="pixel_sigma_px" min="0" max="5" step="0.1"></div>
+  <div class="row"><label for="dropout_probability">Dropout <span class="val" id="v-dropout_probability"></span></label>
+    <input type="range" id="dropout_probability" min="0" max="0.5" step="0.01"></div>
+  <div class="row"><label for="time_scale">Speed of time <span class="val" id="v-time_scale"></span></label>
+    <input type="range" id="time_scale" min="0.1" max="2" step="0.1"></div>
+  <div class="row"><button id="paused">Pause</button></div>
+  <div class="row">
+    <label for="seed">Seed</label>
+    <div class="inline">
+      <input type="number" id="seed" step="1" value="1">
+      <button id="restart">Restart</button>
+    </div>
+  </div>
+
+  <h2>Display</h2>
+  <div class="row"><label><span><input type="checkbox" id="show_cones" checked> Show view cones</span></label></div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// ---- constants ----
+const PANEL_WIDTH_PX = 280;
+const RECONNECT_DELAY_MS = 1000;
+const BEE_RADIUS_M = 0.008;            // display size, enlarged to be visible
+const CONE_LENGTH_M = 0.12;            // display only
+const CONE_OPACITY = 0.08;
+const CAMERA_MARKER_SIZE_M = 0.01;
+const BEE_COLORS = { flying: 0xf97316, walking: 0x2563eb, sitting: 0x9ca3af };
+const DEFAULT_ARENA_M = [0.9, 0.3, 0.3];
+const CONTROL_NAMES = ["bee_count", "max_speed_m_s", "pixel_sigma_px",
+                       "dropout_probability", "time_scale"];
+
+// ---- scene setup ----
+THREE.Object3D.DEFAULT_UP.set(0, 0, 1);   // arena frame: z is up
+const canvas = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 20);
+const controls = new OrbitControls(camera, canvas);
+const arenaGroup = new THREE.Group();
+const cameraGroup = new THREE.Group();
+scene.add(arenaGroup, cameraGroup);
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(0.5, -1, 2);
+scene.add(sun);
+
+const beeMeshes = new Map();   // bee id -> mesh
+const beeGeometry = new THREE.SphereGeometry(BEE_RADIUS_M, 12, 8);
+const beeMaterials = Object.fromEntries(
+  Object.entries(BEE_COLORS).map(([k, c]) => [k, new THREE.MeshStandardMaterial({ color: c })]));
+
+let arenaSize = DEFAULT_ARENA_M;
+let lastState = null;
+
+// Place the orbit camera in front of the long side, looking at the arena centre.
+function resetView(size) {
+  const centre = new THREE.Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
+  controls.target.copy(centre);
+  camera.position.set(centre.x, -size[0] * 1.1, size[2] * 1.2);
+  controls.update();
+}
+
+// Match renderer and camera aspect to the window size.
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+
+// Remove and dispose all children of a group.
+function clearGroup(group) {
+  for (const child of [...group.children]) {
+    group.remove(child);
+    child.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+  }
+}
+
+// Draw the arena box edges and a faint floor.
+function buildArena(size) {
+  clearGroup(arenaGroup);
+  const box = new THREE.BoxGeometry(size[0], size[1], size[2]);
+  box.translate(size[0] / 2, size[1] / 2, size[2] / 2);
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(box),
+    new THREE.LineBasicMaterial({ color: 0x6b7280 }));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(size[0], size[1]),
+    new THREE.MeshBasicMaterial({ color: 0x9ca3af, transparent: true, opacity: 0.15,
+                                  side: THREE.DoubleSide }));
+  floor.position.set(size[0] / 2, size[1] / 2, 0);
+  box.dispose();
+  arenaGroup.add(edges, floor);
+}
+
+// Build a marker plus a translucent view cone for one camera.
+function buildCamera(cam) {
+  const group = new THREE.Group();
+  group.position.fromArray(cam.position_m);
+  group.add(new THREE.Mesh(new THREE.BoxGeometry(CAMERA_MARKER_SIZE_M, CAMERA_MARKER_SIZE_M,
+    CAMERA_MARKER_SIZE_M), new THREE.MeshBasicMaterial({ color: 0x10b981 })));
+
+  const halfAngle = cam.fov_horizontal_rad / 2;
+  const radius = CONE_LENGTH_M * Math.tan(Math.min(halfAngle, 1.5));
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(radius, CONE_LENGTH_M, 24, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: CONE_OPACITY,
+                                  side: THREE.DoubleSide, depthWrite: false }));
+  cone.name = "cone";
+  // ConeGeometry has its apex at +y; move the apex to the origin and point +y along the view axis.
+  cone.geometry.translate(0, -CONE_LENGTH_M / 2, 0);
+  cone.geometry.rotateX(Math.PI);
+  const axis = new THREE.Vector3().fromArray(cam.look_at_m).sub(group.position).normalize();
+  cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+  cone.visible = document.getElementById("show_cones").checked;
+  group.add(cone);
+  cameraGroup.add(group);
+}
+
+// Rebuild arena and cameras from a scene message.
+function handleScene(msg) {
+  arenaSize = msg.arena_size_m;
+  buildArena(arenaSize);
+  clearGroup(cameraGroup);
+  msg.cameras.forEach(buildCamera);
+  resetView(arenaSize);
+}
+
+// Create, move, recolour and remove bee meshes to match the state message.
+function updateBees(bees) {
+  const seen = new Set();
+  for (const bee of bees) {
+    seen.add(bee.id);
+    let mesh = beeMeshes.get(bee.id);
+    if (!mesh) {
+      mesh = new THREE.Mesh(beeGeometry, beeMaterials.sitting);
+      scene.add(mesh);
+      beeMeshes.set(bee.id, mesh);
+    }
+    mesh.position.fromArray(bee.pos);
+    mesh.material = beeMaterials[bee.state] || beeMaterials.sitting;
+  }
+  for (const [id, mesh] of beeMeshes) {
+    if (!seen.has(id)) { scene.remove(mesh); beeMeshes.delete(id); }
+  }
+}
+
+// ---- panel ----
+const $ = id => document.getElementById(id);
+const activeWidgets = new Set();   // widget ids the user is currently dragging or editing
+
+// Format a setting value for display next to its slider.
+function formatValue(name, v) {
+  switch (name) {
+    case "max_speed_m_s": return `${v.toFixed(1)} m/s`;
+    case "pixel_sigma_px": return `${v.toFixed(1)} px`;
+    case "dropout_probability": return `${(v * 100).toFixed(0)} %`;
+    case "time_scale": return `${v.toFixed(1)}x`;
+    default: return String(v);
+  }
+}
+
+// Set a widget from server state unless the user is using it.
+function setWidget(id, value) {
+  if (activeWidgets.has(id) || document.activeElement === $(id)) return;
+  $(id).value = value;
+}
+
+// Show the latest server state in the readout and widgets.
+function updatePanel(msg) {
+  $("ro-t").textContent = `${msg.t.toFixed(2)} s`;
+  $("ro-frame").textContent = String(msg.frame);
+  const counts = { flying: 0, walking: 0, sitting: 0 };
+  for (const b of msg.bees) if (b.state in counts) counts[b.state] += 1;
+  for (const k in counts) $(`ro-${k}`).textContent = String(counts[k]);
+
+  for (const name of CONTROL_NAMES) {
+    const v = msg.settings[name];
+    if (v === undefined) continue;
+    setWidget(name, v);
+    if ($(`v-${name}`)) $(`v-${name}`).textContent = formatValue(name, v);
+  }
+  if (msg.settings.bee_count !== undefined) setWidget("bee_count_num", msg.settings.bee_count);
+  $("paused").textContent = msg.paused ? "Resume" : "Pause";
+}
+
+// ---- websocket ----
+let socket = null;
+
+// Show connected / disconnected in the panel.
+function setStatus(connected) {
+  const el = $("status");
+  el.textContent = connected ? "connected" : "disconnected";
+  el.className = connected ? "ok" : "bad";
+}
+
+// Send one control change to the server if the socket is open.
+function sendControl(name, value) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: "control", name, value }));
+  }
+}
+
+// Open the connection and reconnect after a close.
+function connect() {
+  socket = new WebSocket(`ws://${location.host}/`);
+  socket.onopen = () => setStatus(true);
+  socket.onclose = () => { setStatus(false); setTimeout(connect, RECONNECT_DELAY_MS); };
+  socket.onerror = () => socket.close();
+  socket.onmessage = event => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch { return; }
+    if (msg.type === "scene") handleScene(msg);
+    else if (msg.type === "state") { lastState = msg; updatePanel(msg); updateBees(msg.bees); }
+  };
+}
+
+// Wire a slider: send on input, and mark it active while dragged.
+function wireSlider(name, parse) {
+  const el = $(name);
+  el.addEventListener("pointerdown", () => activeWidgets.add(name));
+  el.addEventListener("pointerup", () => activeWidgets.delete(name));
+  el.addEventListener("pointercancel", () => activeWidgets.delete(name));
+  el.addEventListener("input", () => {
+    const v = parse(el.value);
+    if ($(`v-${name}`)) $(`v-${name}`).textContent = formatValue(name, v);
+    sendControl(name, v);
+  });
+}
+
+// Attach all widget handlers.
+function wireControls() {
+  wireSlider("bee_count", v => parseInt(v, 10));
+  wireSlider("max_speed_m_s", parseFloat);
+  wireSlider("pixel_sigma_px", parseFloat);
+  wireSlider("dropout_probability", parseFloat);
+  wireSlider("time_scale", parseFloat);
+
+  $("bee_count").addEventListener("input", () => { $("bee_count_num").value = $("bee_count").value; });
+  $("bee_count_num").addEventListener("input", () => {
+    const n = parseInt($("bee_count_num").value, 10);
+    if (Number.isNaN(n)) return;
+    const clamped = Math.max(0, Math.min(40, n));
+    $("bee_count").value = clamped;
+    sendControl("bee_count", clamped);
+  });
+  $("paused").addEventListener("click", () => {
+    sendControl("paused", !(lastState && lastState.paused));
+  });
+  $("restart").addEventListener("click", () => {
+    const seed = parseInt($("seed").value, 10);
+    if (!Number.isNaN(seed)) sendControl("seed", seed);
+  });
+  $("show_cones").addEventListener("change", () => {
+    const on = $("show_cones").checked;
+    cameraGroup.traverse(o => { if (o.name === "cone") o.visible = on; });
+  });
+}
+
+// Draw one frame.
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// Match the scene background to the colour scheme.
+function applyBackground() {
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  scene.background = new THREE.Color(dark ? 0x14181d : 0xe5e7eb);
+}
+
+window.addEventListener("resize", resize);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyBackground);
+applyBackground();
+handleScene({ arena_size_m: DEFAULT_ARENA_M, cameras: [] });
+wireControls();
+resize();
+connect();
+animate();
+</script>
+</body>
+</html>
