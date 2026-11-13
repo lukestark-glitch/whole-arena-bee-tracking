@@ -97,6 +97,7 @@ class Simulation:
         next_bee_id: Id of the next bee to be created; ids are never reused.
         paused: True while the frame loop must not step.
         time_scale: Simulation seconds per wall-clock second.
+        stopped_nodes: Ids of camera nodes that send nothing (as if their computer failed).
     """
 
     config: Config
@@ -108,6 +109,7 @@ class Simulation:
     next_bee_id: int
     paused: bool
     time_scale: float
+    stopped_nodes: frozenset[str] = frozenset()
 
 
 def create_simulation(config: Config, seed: int, time_scale: float) -> Simulation:
@@ -152,12 +154,14 @@ def step_simulation(simulation: Simulation) -> list[Outgoing]:
         for c in config.cameras
     }
     for node in config.nodes:
-        out.extend(
-            node_messages(
-                node, seen, simulation.frame, t_s, config.noise, config.ports.detections,
-                simulation.rng,
-            )
+        messages = node_messages(
+            node, seen, simulation.frame, t_s, config.noise, config.ports.detections,
+            simulation.rng,
         )
+        # A stopped node is still simulated and only its datagrams are dropped: the random
+        # draws then stay the same, so the truth and the other nodes do not change.
+        if node.id not in simulation.stopped_nodes:
+            out.extend(messages)
     step_bees(simulation.bees, config.bees, config.arena, 1.0 / rate_hz, simulation.rng)
     simulation.frame += 1
     return sorted(out, key=lambda o: o.send_time_s)
@@ -337,6 +341,29 @@ def _restart(simulation: Simulation, value: object) -> None:
     simulation.next_bee_id = fresh.next_bee_id
 
 
+def _set_node_stopped(simulation: Simulation, value: object) -> None:
+    """Stop or restart one camera node.
+
+    Args:
+        simulation: Simulation, modified in place.
+        value: Object `{"node_id": "node-03", "stopped": true}`.
+
+    Raises:
+        ValueError: If the value is not such an object or the node does not exist.
+    """
+    if not isinstance(value, dict) or set(value) != {"node_id", "stopped"}:
+        raise ValueError(f'node_stopped must be {{"node_id": ..., "stopped": ...}}, got {value!r}')
+    node_id, stopped = value["node_id"], value["stopped"]
+    if not isinstance(stopped, bool):
+        raise ValueError(f"node_stopped.stopped must be true or false, got {stopped!r}")
+    if not any(node.id == node_id for node in simulation.config.nodes):
+        raise ValueError(f"node_stopped.node_id is not a node: {node_id!r}")
+    if stopped:
+        simulation.stopped_nodes = simulation.stopped_nodes | {node_id}
+    else:
+        simulation.stopped_nodes = simulation.stopped_nodes - {node_id}
+
+
 _CONTROLS: dict[str, Callable[[Simulation, object], None]] = {
     "bee_count": _set_bee_count,
     "max_speed_m_s": _set_max_speed,
@@ -345,6 +372,7 @@ _CONTROLS: dict[str, Callable[[Simulation, object], None]] = {
     "paused": _set_paused,
     "time_scale": _set_time_scale,
     "seed": _restart,
+    "node_stopped": _set_node_stopped,
 }
 
 
@@ -354,7 +382,7 @@ def apply_control(simulation: Simulation, name: str, value: object) -> None:
     Args:
         simulation: Simulation, modified in place. Call only between frames.
         name: Control name: bee_count, max_speed_m_s, pixel_sigma_px,
-            dropout_probability, paused, time_scale or seed.
+            dropout_probability, paused, time_scale, seed or node_stopped.
         value: New value; its type and range depend on the control.
 
     Raises:
@@ -366,7 +394,7 @@ def apply_control(simulation: Simulation, name: str, value: object) -> None:
 
 
 def scene_message(config: Config) -> str:
-    """Build the `scene` message: the arena box and the camera poses.
+    """Build the `scene` message: the arena box, the camera poses and the nodes.
 
     Args:
         config: Configuration (arena size in m, cameras in the arena frame).
@@ -383,7 +411,13 @@ def scene_message(config: Config) -> str:
         }
         for c in config.cameras
     ]
-    message = {"type": "scene", "arena_size_m": list(config.arena.size_m), "cameras": cameras}
+    nodes = [{"id": n.id, "cameras": list(n.camera_ids)} for n in config.nodes]
+    message = {
+        "type": "scene",
+        "arena_size_m": list(config.arena.size_m),
+        "cameras": cameras,
+        "nodes": nodes,
+    }
     return json.dumps(message, separators=(",", ":"))
 
 
@@ -404,6 +438,7 @@ def state_message(simulation: Simulation) -> str:
         "seed": simulation.seed,
         "paused": simulation.paused,
         "time_scale": simulation.time_scale,
+        "stopped_nodes": sorted(simulation.stopped_nodes),
         "settings": {
             "bee_count": config.bees.count,
             "max_speed_m_s": config.bees.max_speed_m_s,
