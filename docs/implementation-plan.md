@@ -9,7 +9,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 1 | Simulator core | done |
 | 2 | Simulator window | done |
 | 3 | Tracking core | done |
-| 4 | Control window | not started |
+| 4 | Control window | in progress |
 | 5 | Robot | not started |
 | 6 | Calibration | not started |
 | 7 | Experiments and other arena shapes | not started |
