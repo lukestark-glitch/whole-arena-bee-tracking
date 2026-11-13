@@ -20,7 +20,8 @@ stage asks for it.
 - Decisions D47 to D59.
 
 **Robot result** (60 s, 10 bees, seed 1, default configuration and `config/robot.yaml`,
-tracker with `--auto-select`; cinema picture 24 mm wide, depth of field 2 mm):
+tracker with `--auto-select`; cinema picture 24 mm wide, depth of field 2 mm; both were
+doubled in `config/robot.yaml` afterwards for viewing, the numbers below are not re-measured):
 
 | Run | Time in frame | Time in focus |
 | --- | --- | --- |
