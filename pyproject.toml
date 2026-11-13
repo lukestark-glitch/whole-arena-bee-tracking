@@ -14,7 +14,7 @@ dependencies = ["numpy", "scipy", "pyyaml", "websockets"]
 dev = ["pytest", "pdoc"]
 
 [tool.setuptools]
-packages = ["shared", "simulator", "experiments"]
+packages = ["shared", "simulator", "tracker", "experiments"]
 
 [tool.setuptools.package-data]
 simulator = ["web/*"]
