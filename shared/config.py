@@ -6,6 +6,7 @@ the arena frame: right-handed, x along the long side, y away from the robot,
 z up, in metres.
 """
 
+import math
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,60 @@ class Bees:
 
 
 @dataclass(frozen=True)
+class TrackerSettings:
+    """Tuning values of the tracking server.
+
+    Attributes:
+        frame_timeout_frames: An incomplete frame is processed once a message arrives
+            that is this many frame periods newer.
+        claim_gate_m: A track claims a detection whose ray passes within this distance of
+            the track's predicted position, in metres.
+        ray_tolerance_m: Rays that pass within this distance of a point support it, in
+            metres.
+        min_cameras: Cameras that must agree on a new point.
+        min_cameras_tracked: Cameras that must agree on the point of an existing track.
+        coverage_share: A new point also needs this share of the cameras that should see
+            its location.
+        arena_margin_m: A new point may lie this far outside the arena box, in metres.
+        assignment_gate_m: Largest distance between a predicted track and a new point
+            that may be assigned to it, in metres.
+        confirm_frames: Consecutive frames with support before a track is confirmed.
+        max_missed_frames: Consecutive frames without support before a confirmed track
+            is removed.
+        jerk_sigma_m_s3: Process noise of the filter: standard deviation of the jerk, in
+            m/s^3.
+        measurement_sigma_m: Standard deviation of a triangulated point per axis, in
+            metres.
+        initial_speed_sigma_m_s: Velocity uncertainty of a new track per axis, in m/s.
+        initial_acceleration_sigma_m_s2: Acceleration uncertainty of a new track per
+            axis, in m/s^2.
+        flying_above_m_s: A sitting track becomes flying above this speed, in m/s.
+        sitting_below_m_s: A flying track becomes sitting below this speed, in m/s.
+    """
+
+    frame_timeout_frames: float
+    claim_gate_m: float
+    ray_tolerance_m: float
+    min_cameras: int
+    min_cameras_tracked: int
+    coverage_share: float
+    arena_margin_m: float
+    assignment_gate_m: float
+    confirm_frames: int
+    max_missed_frames: int
+    jerk_sigma_m_s3: float
+    measurement_sigma_m: float
+    initial_speed_sigma_m_s: float
+    initial_acceleration_sigma_m_s2: float
+    flying_above_m_s: float
+    sitting_below_m_s: float
+
+
+# Tracker settings that are whole numbers; all others are floats.
+_TRACKER_INT_FIELDS = ("min_cameras", "min_cameras_tracked", "confirm_frames", "max_missed_frames")
+
+
+@dataclass(frozen=True)
 class Ports:
     """Port numbers: one UDP port per message stream, one TCP port per browser window."""
 
@@ -120,6 +175,7 @@ class Config:
     nodes: tuple[Node, ...]
     noise: Noise
     bees: Bees
+    tracker: TrackerSettings
     ports: Ports
 
 
@@ -339,6 +395,21 @@ def frame_rate_hz(config: Config) -> float:
     return config.camera_models[config.cameras[0].model].rate_hz
 
 
+def last_frame_of(config: Config, duration_s: float) -> int:
+    """Return the number of the last frame that starts before a duration ends.
+
+    Simulator, tracker and metrics all end a run of a given duration with this frame.
+
+    Args:
+        config: A validated configuration.
+        duration_s: Duration in simulation seconds.
+
+    Returns:
+        The largest frame number n with n / frame rate < duration_s.
+    """
+    return math.ceil(duration_s * frame_rate_hz(config)) - 1
+
+
 def _validate(config: Config) -> None:
     """Run all consistency checks on a parsed configuration.
 
@@ -393,6 +464,24 @@ def _parse_bees(raw: Any) -> Bees:
     return Bees(**{**values, "count": int(values["count"])})
 
 
+def _parse_tracker(raw: Any) -> TrackerSettings:
+    """Build TrackerSettings from the ``tracker`` section.
+
+    Args:
+        raw: Parsed YAML mapping.
+
+    Returns:
+        The tracker settings (metres, seconds, frames).
+
+    Raises:
+        ConfigError: If a key is missing.
+    """
+    names = [field.name for field in fields(TrackerSettings)]
+    values = {name: float(_require(raw, name, "tracker")) for name in names}
+    whole = {name: int(values[name]) for name in _TRACKER_INT_FIELDS}
+    return TrackerSettings(**{**values, **whole})
+
+
 def _parse_ports(raw: Any) -> Ports:
     """Build Ports from the ``ports`` section.
 
@@ -436,6 +525,7 @@ def _parse(raw: Any) -> Config:
         nodes=tuple(_parse_node(n) for n in _require(raw, "nodes", "top level")),
         noise=_parse_noise(_require(raw, "noise", "top level")),
         bees=_parse_bees(_require(raw, "bees", "top level")),
+        tracker=_parse_tracker(_require(raw, "tracker", "top level")),
         ports=_parse_ports(_require(raw, "ports", "top level")),
     )
 
