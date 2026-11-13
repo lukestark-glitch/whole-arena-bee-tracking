@@ -190,6 +190,63 @@ def test_seed_control_restarts() -> None:
     ]
 
 
+def _stop(node_id: str, stopped: bool) -> tuple[str, object]:
+    """Build a `node_stopped` control."""
+    return ("node_stopped", {"node_id": node_id, "stopped": stopped})
+
+
+def _node_ids(outgoing: list[Outgoing]) -> list[str]:
+    """Node ids of the detections messages in one frame."""
+    return [m.node_id for m in (decode(o.datagram) for o in outgoing) if isinstance(m, Detections)]
+
+
+def test_stopped_node_sends_nothing_and_changes_nothing_else() -> None:
+    """A stopped node is silent; the truth and the other nodes stay byte-identical."""
+    reference = _frames(CONFIG, 5, 120)
+    stopped = _frames_with_controls(5, 120, {0: _stop("node-03", True)})
+    for frame_ref, frame_stopped in zip(reference, stopped, strict=True):
+        assert "node-03" not in _node_ids(frame_stopped)
+        assert len(_node_ids(frame_stopped)) == 14
+        kept = [o for o in frame_ref if "node-03" not in _node_ids([o])]
+        assert frame_stopped == kept
+
+
+def test_node_restart_brings_messages_back() -> None:
+    """Starting a stopped node again makes it send again."""
+    simulation = create_simulation(CONFIG, 1, 1.0)
+    apply_control(simulation, *_stop("node-03", True))
+    assert "node-03" not in _node_ids(step_simulation(simulation))
+    apply_control(simulation, *_stop("node-03", False))
+    assert _node_ids(step_simulation(simulation)).count("node-03") == 2
+
+
+def test_stopped_node_survives_seed_control() -> None:
+    """A restart with a new seed keeps the stopped nodes."""
+    simulation = create_simulation(CONFIG, 1, 1.0)
+    apply_control(simulation, *_stop("node-03", True))
+    apply_control(simulation, "seed", 7)
+    assert simulation.stopped_nodes == frozenset({"node-03"})
+    assert "node-03" not in _node_ids(step_simulation(simulation))
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"node_id": "node-99", "stopped": True},
+        {"stopped": True},
+        {"node_id": "node-03"},
+        {"node_id": "node-03", "stopped": 1},
+        "node-03",
+    ],
+)
+def test_invalid_node_stopped(value: object) -> None:
+    """Unknown nodes, missing keys, non-bool flags and plain strings are refused."""
+    simulation = create_simulation(CONFIG, 1, 1.0)
+    with pytest.raises(ValueError):
+        apply_control(simulation, "node_stopped", value)
+    assert simulation.stopped_nodes == frozenset()
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [
