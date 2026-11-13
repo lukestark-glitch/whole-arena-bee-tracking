@@ -15,11 +15,12 @@ import pytest
 from websockets.asyncio.client import ClientConnection, connect
 
 import simulator.main as main
-from shared.config import load_config
+from shared.config import load_config, load_robot
 from shared.protocol import UDP_HOST
 from simulator.main import create_simulation, scene_message, state_message
 
 CONFIG = load_config(Path(__file__).parent.parent / "config" / "default.yaml")
+ROBOT = load_robot(Path(__file__).parent.parent / "config" / "robot.yaml")
 RUN_DURATION_S = 15.0  # simulation time of the background run; ended early by the tests
 FINISH_TIME_SCALE = 100.0  # makes the rest of the run take a few milliseconds
 TIMEOUT_S = 10.0  # generous, so a busy computer does not fail the test
@@ -62,11 +63,12 @@ async def _drain(ws: ClientConnection) -> None:
 def _running() -> Iterator[int]:
     """Run the simulator in a thread and yield its window port; join at the end."""
     port = _free_tcp_port()
+    # Port 0 for `target` lets the system pick a free port to listen on.
     config = dataclasses.replace(
-        CONFIG, ports=dataclasses.replace(CONFIG.ports, simulator_window=port)
+        CONFIG, ports=dataclasses.replace(CONFIG.ports, simulator_window=port, target=0)
     )
     thread = threading.Thread(
-        target=main.run, args=(config, 1, RUN_DURATION_S, 1.0, False), daemon=True
+        target=main.run, args=(config, ROBOT, 1, RUN_DURATION_S, 1.0, False), daemon=True
     )
     thread.start()
     try:
@@ -110,7 +112,7 @@ async def _next_state(ws: ClientConnection) -> dict:
 
 def test_scene_message() -> None:
     """The scene lists the arena size and every camera with its field of view."""
-    message = json.loads(scene_message(CONFIG))
+    message = json.loads(scene_message(CONFIG, ROBOT))
     assert message["type"] == "scene"
     assert message["arena_size_m"] == list(CONFIG.arena.size_m)
     assert len(message["cameras"]) == 16
@@ -120,7 +122,7 @@ def test_scene_message() -> None:
 
 def test_scene_message_lists_nodes() -> None:
     """The scene lists the 8 nodes with two cameras each, in config order."""
-    nodes = json.loads(scene_message(CONFIG))["nodes"]
+    nodes = json.loads(scene_message(CONFIG, ROBOT))["nodes"]
     assert len(nodes) == 8 and all(len(n["cameras"]) == 2 for n in nodes)
     assert [n["id"] for n in nodes] == [n.id for n in CONFIG.nodes]
     assert nodes[0] == {"id": "node-01", "cameras": ["cam-01", "cam-02"]}
@@ -128,7 +130,7 @@ def test_scene_message_lists_nodes() -> None:
 
 def test_state_message_lists_stopped_nodes() -> None:
     """The state lists the stopped nodes, sorted."""
-    simulation = create_simulation(CONFIG, 3, 1.0)
+    simulation = create_simulation(CONFIG, ROBOT, 3, 1.0)
     assert json.loads(state_message(simulation))["stopped_nodes"] == []
     for node_id in ("node-05", "node-03"):
         main.apply_control(simulation, "node_stopped", {"node_id": node_id, "stopped": True})
@@ -151,7 +153,7 @@ def test_node_stopped_over_websocket() -> None:
 
 def test_state_message() -> None:
     """The state holds frame, time, settings and one entry per bee."""
-    simulation = create_simulation(CONFIG, 3, 2.0)
+    simulation = create_simulation(CONFIG, ROBOT, 3, 2.0)
     message = json.loads(state_message(simulation))
     assert message["type"] == "state" and message["frame"] == 0 and message["t"] == 0.0
     assert message["seed"] == 3 and message["paused"] is False and message["time_scale"] == 2.0
@@ -160,6 +162,16 @@ def test_state_message() -> None:
         "max_speed_m_s": CONFIG.bees.max_speed_m_s,
         "pixel_sigma_px": CONFIG.noise.pixel_sigma_px,
         "dropout_probability": CONFIG.noise.dropout_probability,
+        "rail_max_speed_m_s": ROBOT.rail.max_speed,
+        "rail_max_acceleration_m_s2": ROBOT.rail.max_acceleration,
+        "tilt_max_speed_rad_s": ROBOT.tilt.max_speed,
+        "tilt_max_acceleration_rad_s2": ROBOT.tilt.max_acceleration,
+    }
+    assert message["robot"] == {
+        "rail_m": ROBOT.rail.upper / 2.0,
+        "tilt_rad": 0.0,
+        "focus_m": (ROBOT.focus.lower + ROBOT.focus.upper) / 2.0,
+        "has_target": False,
     }
     assert [b["id"] for b in message["bees"]] == list(range(10))
     assert len(message["bees"][0]["pos"]) == 3 and message["bees"][0]["state"] == "flying"
@@ -200,3 +212,23 @@ def test_http_page(page_exists: bool, tmp_path: Path, monkeypatch: pytest.Monkey
         status, body = _get(port)
     assert status == (200 if page_exists else 404)
     assert (body == page.read_bytes()) if page_exists else body
+
+
+def test_cinema_images_are_relayed_to_viewers() -> None:
+    """A binary message from the page reaches a client connected to the cinema path."""
+    image = b"\xff\xd8 not a real image \xff\xd9"
+
+    async def session(port: int) -> None:
+        page = await _connect(port)
+        async with page, connect(f"ws://{UDP_HOST}:{port}{main.CINEMA_PATH}") as viewer:
+            received = None
+            while received != image:
+                # The viewer may register a moment after the first image; send until it shows.
+                await page.send(image)
+                try:
+                    received = await asyncio.wait_for(viewer.recv(), CONNECT_PAUSE_S)
+                except TimeoutError:
+                    pass
+
+    with _running() as port:
+        asyncio.run(asyncio.wait_for(session(port), TIMEOUT_S))

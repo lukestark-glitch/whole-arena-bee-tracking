@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from shared.config import CameraModel
+from shared.config import CameraModel, Cinema, Robot
 
 # Arena "up" axis; it fixes the camera roll so that image "up" is arena +z.
 _ARENA_UP = np.array([0.0, 0.0, 1.0])
@@ -185,3 +185,55 @@ def is_visible(pose: CameraPose, model: CameraModel, points_m: np.ndarray) -> np
         & (pixels_px[:, 1] < model.height_px)
     )
     return (theta_rad < _MAX_VISIBLE_THETA_RAD) & in_image
+
+
+def robot_camera_pose(robot: Robot, rail_m: float, tilt_rad: float) -> CameraPose:
+    """Pose of the robot's cameras (cinema and stereo) for given axis positions.
+
+    The tilt axis sits at ``rail_start_m`` moved by ``rail_m`` along +x. The optical axis
+    is (0, cos tilt, sin tilt): along +y when horizontal, towards +z when tilted up. The
+    lens reference point lies ``lens_offset_m`` ahead of the tilt axis on the optical axis.
+
+    Args:
+        robot: Robot description.
+        rail_m: Carriage position along the rail (m).
+        tilt_rad: Tilt, 0 = horizontal, positive = up (rad).
+
+    Returns:
+        Camera pose with its centre at the lens reference point, arena frame.
+    """
+    forward = np.array([0.0, np.cos(tilt_rad), np.sin(tilt_rad)])
+    axis_m = np.array(robot.rail_start_m) + np.array([rail_m, 0.0, 0.0])
+    lens_m = axis_m + robot.lens_offset_m * forward
+    return camera_pose(lens_m, lens_m + forward)
+
+
+def cinema_view(
+    pose: CameraPose, cinema: Cinema, points_m: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Tell which points the cinema camera frames, and how deep they lie.
+
+    The cinema lens is treated as a pinhole: a point is in the frame when its horizontal
+    and vertical angles from the optical axis are within half the field of view.
+
+    Args:
+        pose: Pose of the cinema camera (from `robot_camera_pose`).
+        cinema: Cinema camera (field of view in rad, aspect ratio).
+        points_m: Shape (N, 3), arena frame, metres.
+
+    Returns:
+        Shape (N,) booleans, True where the point is inside the frame, and shape (N,)
+        depths along the optical axis in metres (compare with the focus distance).
+    """
+    points_camera_m = _to_camera_frame(pose, points_m)
+    depth_m = points_camera_m[:, 2]
+    half_width = np.tan(cinema.fov_horizontal_rad / 2.0)
+    # Pinhole: the image half height is the half width divided by the aspect ratio.
+    half_height = half_width / cinema.aspect_ratio
+    in_front = depth_m > 0.0
+    in_frame = (
+        in_front
+        & (np.abs(points_camera_m[:, 0]) <= half_width * depth_m)
+        & (np.abs(points_camera_m[:, 1]) <= half_height * depth_m)
+    )
+    return in_frame, depth_m
