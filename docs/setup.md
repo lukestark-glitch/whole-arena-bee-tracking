@@ -3,8 +3,8 @@
 How to install and run what exists. Keep this file correct: every stage adds its commands
 here.
 
-Status: Stages 0 to 3 are built (configuration, messages, simulator with its window,
-tracker without its window, metrics). The sections marked "after Stage n"
+Status: Stages 0 to 4 are built (configuration, messages, simulator and tracker with
+their windows, metrics). The sections marked "after Stage n"
 are filled in by that stage.
 
 ## Requirements
@@ -80,8 +80,8 @@ It prints one line per second of simulation time. Expected with the default conf
 python -m tracker.main
 ```
 
-It listens for `detections` (UDP 5005) and writes one line per frame to `logs/tracks.jsonl`.
-Start it before the simulator.
+It listens for `detections` (UDP 5005), writes one line per frame to `logs/tracks.jsonl`
+and serves the control window on port 8766. Start it before the simulator.
 
 | Option | Meaning | Default |
 | --- | --- | --- |
@@ -112,7 +112,20 @@ The page loads three.js from a CDN, so the first load needs an internet connecti
 - The panel changes the running simulation: number of bees, maximum speed, pixel noise,
   dropout, pause, time scale. "Restart" starts again at frame 0 with the given seed.
 
-Control window: to be written by Stage 4.
+- "Camera nodes" stops and restarts single nodes.
+
+Control window: start the tracker, then open <http://127.0.0.1:8766/>. Put both windows
+side by side.
+
+- It shows what the tracker believes: one coloured sphere per track with its ID, a trail
+  of the last two seconds and a short line to the predicted position.
+- Click a bee, or its row in the "Tracks" list, to select it. "Selected bee" then shows its
+  speed, smoothed acceleration, state and number of cameras, live.
+- The strip at the bottom shows every camera's image points with the ID each was used for.
+- "Health" shows each node and turns red when a node has been silent for half a second.
+
+If the simulator is restarted (seed and "Restart"), the tracker notices and starts with
+fresh tracks.
 
 ## Run the experiments (after Stage 7)
 

@@ -3,6 +3,16 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-13: Stage 4, control window
+
+- Control window at <http://127.0.0.1:8766/>: tracks with ID, trail and predicted position,
+  selection by click, live values of the selected bee, a panel per camera with its
+  detections and their IDs, health panel.
+- Tracker: snapshots over WebSocket, selection, node health, fresh start when the
+  simulator restarts.
+- Simulator window: stop and restart single camera nodes.
+- Config: port `control_window`, three new tracker settings (decisions D39 to D45).
+
 ## 2026-11-13: Stage 3, tracking core
 
 - `tracker/`: receiver, triangulation (known tracks first, then new points with ghost
