@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whole-arena-bee-tracking"
+version = "0.0.0"
+description = "Proof of concept for whole-arena 3D tracking of bumblebees"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = ["numpy", "scipy", "pyyaml", "websockets"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pdoc"]
+
+[tool.setuptools]
+packages = ["shared"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
