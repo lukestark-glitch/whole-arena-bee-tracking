@@ -6,7 +6,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | Stage | Name | Status |
 | --- | --- | --- |
 | 0 | Foundation | done |
-| 1 | Simulator core | not started |
+| 1 | Simulator core | done |
 | 2 | Simulator window | not started |
 | 3 | Tracking core | not started |
 | 4 | Control window | not started |

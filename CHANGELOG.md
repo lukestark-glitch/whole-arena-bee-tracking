@@ -3,6 +3,16 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-13: Stage 1, simulator core
+
+- `shared/geometry.py`: camera pose, equidistant fisheye projection, pixel to ray,
+  visibility test.
+- `simulator/`: bee model (sitting, walking, flying), virtual cameras with noise, dropout
+  and blob size, camera nodes with delay, fixed-step loop with real-time pacing.
+- `python -m simulator.main` sends `detections` and `truth`.
+  `python -m experiments.listen_detections` shows what arrives.
+- Config: new `bees` section. All cameras must share one frame rate (decisions D19 to D25).
+
 ## 2026-11-13: Stage 0, foundation
 
 - The project installs with `pip install -e ".[dev]"`.

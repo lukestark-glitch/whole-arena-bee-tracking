@@ -14,7 +14,7 @@ dependencies = ["numpy", "scipy", "pyyaml", "websockets"]
 dev = ["pytest", "pdoc"]
 
 [tool.setuptools]
-packages = ["shared"]
+packages = ["shared", "simulator", "experiments"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
