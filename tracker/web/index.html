@@ -96,6 +96,10 @@
   </table>
   <div style="margin-top:8px"><button id="clear">Clear</button></div>
 
+  <h2>Cinema view</h2>
+  <img id="cinema" alt="cinema view of the robot" style="width:100%;display:block;background:#000">
+  <div class="empty" id="cinema-note">needs an open simulator window</div>
+
   <h2>Tracks</h2>
   <div id="track-list"><div class="empty">no tracks</div></div>
 
@@ -123,6 +127,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 // ---- constants ----
 const RECONNECT_DELAY_MS = 1000;
+let cinemaSocket = null;   // image stream of the cinema view, from the simulator
 const TRAIL_SECONDS = 2;               // simulation seconds of trail kept per track
 const TRACK_RADIUS_M = 0.008;          // display size, enlarged to be visible
 const PROBATION_SCALE = 0.6;
@@ -556,6 +561,7 @@ function handleScene(msg) {
   buildNodeChips(msg.nodes);
   buildCameraPanels(msg.cameras);
   resetView(msg.arena_size_m);
+  if (msg.cinema_port) connectCinema(msg.cinema_port);
 }
 
 // Show a tracks message everywhere.
@@ -572,6 +578,22 @@ function handleTracks(msg) {
 }
 
 // Open the connection and reconnect after a close.
+// Show the robot's cinema view. It arrives like a video feed, as JPEG images over a
+// WebSocket of the simulator; the tracker itself never sees these images.
+function connectCinema(port) {
+  if (cinemaSocket) { cinemaSocket.onclose = null; cinemaSocket.close(); }
+  cinemaSocket = new WebSocket(`ws://${location.hostname}:${port}/cinema`);
+  cinemaSocket.onclose = () => setTimeout(() => connectCinema(port), RECONNECT_DELAY_MS);
+  cinemaSocket.onerror = () => cinemaSocket.close();
+  cinemaSocket.onmessage = event => {
+    const image = document.getElementById("cinema");
+    const old = image.src;
+    image.src = URL.createObjectURL(event.data);
+    if (old) URL.revokeObjectURL(old);
+    document.getElementById("cinema-note").hidden = true;
+  };
+}
+
 function connect() {
   socket = new WebSocket(`ws://${location.host}/`);
   socket.onopen = () => setStatus(true);
