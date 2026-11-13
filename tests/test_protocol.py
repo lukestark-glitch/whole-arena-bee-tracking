@@ -183,3 +183,13 @@ def test_decode_type_not_a_string() -> None:
     """A type field that is not a string is reported as an unknown type."""
     with pytest.raises(ProtocolError, match="unknown message type"):
         decode(b'{"v":1,"type":[]}')
+
+
+def test_split_parts_are_filled() -> None:
+    """Splitting wastes no room: adding the next entry to a part would reach the limit."""
+    bees = tuple((1000.0 + i, 500.25, 20.5) for i in range(500))
+    parts = encode_detections(Detections("node-01", "cam-01", 7, 0.5, bees))
+    decoded = [decode(part) for part in parts]
+    for part, following in zip(decoded, decoded[1:]):
+        longer = Detections("node-01", "cam-01", 7, 0.5, part.bees + following.bees[:1])
+        assert len(encode_detections(longer)) == 2

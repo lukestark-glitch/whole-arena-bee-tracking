@@ -3,7 +3,7 @@
 How the parts fit together and how they talk to each other. Update this file whenever a
 component or a channel changes. Message fields are defined in `docs/protocol.md`.
 
-Status: `shared/` and the simulator without its window are built (Stages 0 and 1).
+Status: `shared/` and the simulator with its window are built (Stages 0 to 2).
 Everything else is design. Each section notes the stage that builds it.
 
 ## Overview
@@ -51,14 +51,17 @@ Owns simulation time and the ground truth.
 
 - Bee model: each bee is sitting, walking or flying. Positions advance once per frame.
   A flying bee lands only where it touches a wall, so it never jumps.
-- Virtual cameras: project every visible bee into every camera, add pixel noise and drop
-  detections at random. Wall markers follow in Stage 6.
+- Virtual cameras: project every visible bee into every camera, merge blobs that overlap
+  in the image, add pixel noise and drop detections at random. Wall markers follow in
+  Stage 6.
 - Camera nodes: group two cameras per node, add the node's processing delay (one random
   delay per node and frame, shared by both cameras), and send one `detections` message per
-  camera and frame. Node failure follows with the controls in Stage 2.
+  camera and frame. Node failure is not built yet.
 - Sends `truth` once per frame.
-- Serves the simulator window and accepts control changes from it (bee count, speed, noise,
-  dropouts, pause, time scale, seed).
+- Serves the simulator window (page and WebSocket on one port) and accepts control changes
+  from it (bee count, speed, noise, dropouts, pause, time scale, seed). Changes are applied
+  between frames, so a run with the same seed and the same changes at the same frames
+  repeats exactly.
 
 ### `robot_emulator/` (Stage 5)
 
@@ -101,6 +104,47 @@ results. Each receives state snapshots over a WebSocket and sends user input bac
 
 The cinema view is rendered in the simulator window's process (it needs the truth) and is
 shown in the control window as an image stream, the way a real video feed would arrive.
+
+### Messages of the simulator window (WebSocket, port 8765)
+
+JSON text frames. The same port serves the page itself at `http://127.0.0.1:8765/`.
+Positions are in the arena frame in metres.
+
+Simulator → page, once after the connection opens:
+
+```json
+{"type": "scene", "arena_size_m": [0.9, 0.3, 0.3],
+ "cameras": [{"id": "cam-01", "position_m": [0, 0, 0], "look_at_m": [0.45, 0.15, 0.15],
+              "fov_horizontal_rad": 1.919862}]}
+```
+
+Simulator → page, at most 30 times per second of wall time (also while paused):
+
+```json
+{"type": "state", "frame": 1042, "t": 17.366667, "seed": 1, "paused": false,
+ "time_scale": 1.0,
+ "settings": {"bee_count": 10, "max_speed_m_s": 5.0, "pixel_sigma_px": 0.5,
+              "dropout_probability": 0.02},
+ "bees": [{"id": 0, "pos": [0.41, 0.15, 0.17], "state": "flying"}]}
+```
+
+Page → simulator, one message per change:
+
+```json
+{"type": "control", "name": "bee_count", "value": 12}
+```
+
+| `name` | `value` | Effect |
+| --- | --- | --- |
+| `bee_count` | int, 0 to 200 | Bees are added (new ids) or the newest are removed |
+| `max_speed_m_s` | float above 0, at most 20 | Speed limit of all bees |
+| `pixel_sigma_px` | float, 0 or more | Pixel noise of all cameras |
+| `dropout_probability` | float 0..1 | Chance that a detection is missed |
+| `paused` | bool | Simulation time stops, no UDP messages are sent |
+| `time_scale` | float, 0.01 to 100 | Simulation seconds per second of wall time |
+| `seed` | int | Restart at frame 0 with this seed and the current settings |
+
+A change takes effect at the start of the next frame. An invalid message is ignored.
 
 ## Timing
 
