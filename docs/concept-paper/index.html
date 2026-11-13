@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whole-Arena Bumblebee Tracking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: a single-column technical paper, 68ch text measure, figures allowed to run wider than the text. */
+:root {
+  --paper: #f4f6f7;
+  --surface: #ffffff;
+  --ink: #18222b;
+  --muted: #5d6b76;
+  --rule: #cfd7dc;
+  --bee: #b97700;      /* the selected bumblebee */
+  --cam: #0f6f78;      /* fixed tracking cameras */
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12181d; --surface: #1a2229; --ink: #e6ebee; --muted: #9aa7b0;
+    --rule: #33404a; --bee: #f0b429; --cam: #4fc3cd; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12181d; --surface: #1a2229; --ink: #e6ebee; --muted: #9aa7b0;
+  --rule: #33404a; --bee: #f0b429; --cam: #4fc3cd; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: var(--font-body); font-size: 17px; line-height: 1.6;
+}
+main { max-width: 860px; margin: 0 auto; padding: 56px 24px 96px; }
+.text { max-width: 68ch; }
+header { border-bottom: 2px solid var(--ink); padding-bottom: 24px; margin-bottom: 32px; }
+.kicker { font-family: var(--font-mono); font-size: 13px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin: 0 0 12px; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(32px, 6vw, 46px); line-height: 1.08; margin: 0 0 16px; text-wrap: balance; }
+.byline { font-family: var(--font-mono); font-size: 14px; color: var(--muted); margin: 0; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 27px; line-height: 1.2; margin: 56px 0 12px; text-wrap: balance; }
+h2 .n { font-family: var(--font-mono); font-weight: 400; font-size: 16px; color: var(--muted); margin-right: 10px; }
+h3 { font-family: var(--font-body); font-weight: 600; font-size: 18px; margin: 28px 0 6px; }
+p { margin: 0 0 14px; }
+ul { margin: 0 0 14px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+.abstract { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--bee); padding: 20px 22px; margin: 0 0 8px; }
+.abstract p:last-child { margin-bottom: 0; }
+.abstract .label { font-family: var(--font-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 8px; }
+code { font-family: var(--font-mono); font-size: .88em; }
+figure { margin: 28px 0 30px; }
+.fig { background: var(--surface); border: 1px solid var(--rule); padding: 14px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; min-width: 620px; height: auto; color: var(--ink); font-family: var(--font-body); }
+figcaption { font-size: 14.5px; color: var(--muted); margin-top: 10px; max-width: 72ch; line-height: 1.5; }
+figcaption b { color: var(--ink); font-weight: 600; }
+.tablewrap { overflow-x: auto; margin: 18px 0 24px; }
+table { border-collapse: collapse; width: 100%; min-width: 600px; font-size: 15px; line-height: 1.45; background: var(--surface); }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border: 1px solid var(--rule); }
+th { font-family: var(--font-mono); font-weight: 500; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+td.num, .mono { font-family: var(--font-mono); font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.note { font-size: 15px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 14px; margin-top: 48px; }
+a { color: inherit; }
+/* SVG vocabulary */
+.ln { stroke: currentColor; stroke-width: 1.4; fill: none; }
+.ln-m { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+.ln-cam { stroke: var(--cam); stroke-width: 1.3; fill: none; }
+.ln-bee { stroke: var(--bee); stroke-width: 2; fill: none; }
+.dash { stroke-dasharray: 5 4; }
+.box { fill: var(--surface); stroke: currentColor; stroke-width: 1.4; }
+.box-p { fill: var(--paper); stroke: currentColor; stroke-width: 1.4; }
+.box-m { fill: var(--paper); stroke: var(--muted); stroke-width: 1.2; }
+.f-ink { fill: currentColor; }
+.f-m { fill: var(--muted); }
+.f-cam { fill: var(--cam); }
+.f-bee { fill: var(--bee); }
+.f-none { fill: none; }
+.t { fill: currentColor; font-size: 12.5px; }
+.tb { fill: currentColor; font-size: 13px; font-weight: 600; }
+.tm { fill: var(--muted); font-size: 12px; }
+.tc { fill: var(--cam); font-size: 12px; font-weight: 500; }
+.ty { fill: var(--bee); font-size: 12.5px; font-weight: 600; }
+.mid { text-anchor: middle; }
+.end { text-anchor: end; }
+@media print {
+  @page { size: A4; margin: 15mm 19mm; }
+  body { font-size: 10pt; line-height: 1.45; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  main { max-width: none; padding: 0; }
+  .text, figcaption { max-width: none; }
+  header { padding-bottom: 12pt; margin-bottom: 16pt; }
+  .kicker { font-size: 7.5pt; margin-bottom: 6pt; }
+  h1 { font-size: 23pt; margin-bottom: 8pt; }
+  .byline { font-size: 8pt; }
+  h2 { font-size: 14.5pt; margin: 16pt 0 5pt; }
+  h2 .n { font-size: 10pt; }
+  h3 { font-size: 10.5pt; margin: 12pt 0 3pt; }
+  p { margin-bottom: 6pt; }
+  ul { margin-bottom: 6pt; }
+  li { margin-bottom: 2.5pt; }
+  .abstract { padding: 10pt 12pt; }
+  .abstract .label { font-size: 7pt; }
+  figure { margin: 8pt 0 10pt; }
+  .fig { padding: 6pt; overflow: visible; }
+  .fig svg { min-width: 0; width: 78%; margin: 0 auto; }
+  figcaption { font-size: 8.5pt; margin-top: 5pt; }
+  .tablewrap { overflow: visible; margin: 8pt 0 12pt; }
+  table { min-width: 0; font-size: 8.5pt; line-height: 1.4; }
+  th { font-size: 7pt; }
+  th, td { padding: 4pt 6pt; }
+  td.num, .mono { font-size: 8pt; }
+  .note { font-size: 8.5pt; margin-top: 12pt; padding-top: 6pt; }
+  h2, h3 { break-after: avoid; }
+  p, li, figure, table, tr, .abstract { break-inside: avoid; }
+  ul, .tablewrap { break-before: avoid; }
+}
+@media (max-width: 480px) { body { font-size: 16px; } main { padding: 36px 16px 72px; } }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <p class="kicker">Concept paper</p>
+  <h1>Whole-arena 3D tracking for a bumblebee camera robot</h1>
+  <p class="byline">Luke Stark · 13 November 2026 · Written with Claude</p>
+  <p class="byline" style="margin-top:6px">Idea stage. Nothing here has been built or tested yet.</p>
+</header>
+
+<div class="abstract text">
+  <div class="label">Summary</div>
+  <p>Jeremy Fielding's camera robot follows a flying bumblebee with a macro lens. Its tracker sits on the robot and follows the largest yellow blob it can see, so with several bees in the arena the camera jumps from one bee to the next.</p>
+  <p>My idea is to add a second, fixed system: several small cameras mounted around the flight arena that see every bumblebee at once, compute each bee's 3D position, and give each bee a stable ID. An operator picks one bee in a control program, and the robot receives where that bee is, where it will be a moment later, and how far away it is. The robot keeps its own stereo camera for fine centring and fine focus.</p>
+  <p>This paper describes the idea, the problems it is meant to solve, the functions it needs, and how I currently picture the system. The first goal is a software proof of concept that runs against a simulation with realistic hardware parameters.</p>
+</div>
+
+<section>
+<h2><span class="n">1</span>Where the idea comes from</h2>
+<div class="text">
+<p>I watched Jeremy Fielding's "Engineer vs Bee" series, in which he designs and builds a high-speed camera robot for a group of science filmmakers in Berkeley. The aim is to film bumblebees in flight in colour, at roughly 1.5× magnification and at thousands of frames per second, with the camera chasing the bee the way a broadcast camera follows a swimmer. I find the project and what he has achieved so far fascinating.</p>
+<p>While watching the field test I noticed that the camera kept switching between bees. That made me think about tracking from the outside instead of from the robot: if cameras fixed to the arena could see all bumblebees at the same time, the system would always know which bee is which. The jumping would disappear, and a piece of software could let you choose which bee to follow.</p>
+</div>
+</section>
+
+<section>
+<h2><span class="n">2</span>The robot today</h2>
+<div class="text">
+<p>This is my understanding of the current robot, taken from the four videos.</p>
+<ul>
+  <li><b>Motion.</b> A cinema camera with a 180 mm macro lens travels on a linear rail and tilts up and down. A motor turns the focus ring.</li>
+  <li><b>Sensing.</b> A calibrated stereo camera pair rides on the robot. It uses wide lenses (about 105° field of view), a 50 mm baseline, and works at about 150 mm from the bee. It measures the distance to the bee, and a measured curve converts that distance into a focus-ring position.</li>
+  <li><b>Detection.</b> OpenCV looks for yellow against a black background and puts a box around the largest blob. Searching the full image runs at about 32 Hz. Once a bee is found the search shrinks to the area around its last position and runs at about 60 Hz.</li>
+  <li><b>Compute.</b> A Jetson runs vision and motor control. The vision code is written in C++.</li>
+  <li><b>Arena.</b> An acrylic and mesh flight chamber of about 3 ft × 1 ft × 1 ft, connected to a colony and lit from the sides, because bees fly toward light and otherwise bump against the ceiling.</li>
+</ul>
+<p>The requirements are hard. Bumblebees can fly at about 5 m/s and reverse direction in under 50 ms. At macro magnification the focus has to be right to within 1 to 2 mm, and small camera movements are clearly visible in the picture.</p>
+</div>
+</section>
+
+<section>
+<h2><span class="n">3</span>Problems I hope to solve</h2>
+<div class="text">
+<p>The filmmakers want several bees in the arena, because interactions between bees are the interesting footage. The current tracker was designed around one bee. The table lists the problems shown in the videos and what a whole-arena tracker could contribute to each.</p>
+</div>
+<div class="tablewrap">
+<table>
+<thead><tr><th style="width:24%">Problem</th><th style="width:36%">Cause in the current system</th><th>Contribution of whole-arena tracking</th></tr></thead>
+<tbody>
+<tr><td><b>The camera jumps between bees</b></td><td>The tracker follows the largest yellow blob. A bee that passes closer to the lens looks larger and takes over.</td><td>Every bee has an ID. The robot follows the selected ID, whatever else enters its view.</td></tr>
+<tr><td><b>A lost bee is hard to find again</b></td><td>The robot's view is narrow. Once the bee leaves it, the tracker does not know where to look.</td><td>The fixed cameras always see the whole arena and can point the robot back at the bee.</td></tr>
+<tr><td><b>The camera lags behind in flight</b></td><td>Prediction ("feed forward") needs the bee's velocity. The stereo camera moves with the robot, so robot motion and flex are mixed into the measurement. On the tilt axis a 3D-printed part flexed by almost 2°, about 7 mm at 200 mm distance.</td><td>Fixed cameras measure the bee's position and velocity in the room, independent of robot motion. The robot still has to know its own pose, so the mechanical fix is needed as well.</td></tr>
+<tr><td><b>Dead zone: steady picture or fast reaction</b></td><td>A 2 to 3 mm dead zone keeps the picture calm while a bee sits, but gives a departing bee a head start. It is switched by hand.</td><td>The 3D velocity shows whether the bee is sitting or flying, so the mode could switch automatically.</td></tr>
+<tr><td><b>Focus hunts or lags</b></td><td>Focus updates at 20 Hz to avoid visible hunting. In fast flight that is too slow.</td><td>The distance to the bee is known and predicted. Focus can move ahead of the bee, and the update rate can follow the flight state.</td></tr>
+<tr><td><b>Switching to another bee</b></td><td>Not possible on purpose. The tracker chooses by blob size.</td><td>Clicking a bee in the software re-aims the robot and presets focus before the bee is in view.</td></tr>
+</tbody>
+</table>
+</div>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 720 300" role="img" aria-label="Top view of the arena. Left: the robot's own tracker follows the largest blob and jumps between bees. Right: fixed cameras see all bees, each has an ID, and the robot follows the selected one.">
+  <defs>
+    <marker id="a1" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" class="f-ink"/></marker>
+  </defs>
+  <text x="20" y="24" class="tb">Today: the tracker rides on the robot</text>
+  <text x="380" y="24" class="tb">Proposed: fixed cameras see the whole arena</text>
+  <!-- left arena -->
+  <rect x="20" y="50" width="320" height="150" class="box-p"/>
+  <polygon points="180,250 168,118 232,118" class="f-bee" opacity=".22"/>
+  <polygon points="180,250 96,112 142,104" class="f-m" opacity=".18"/>
+  <circle cx="120" cy="112" r="6" class="f-ink"/>
+  <circle cx="200" cy="130" r="10" class="f-ink"/>
+  <circle cx="290" cy="90" r="6" class="f-ink"/>
+  <path d="M130,100 Q160,78 190,112" class="ln" marker-end="url(#a1)"/>
+  <text x="160" y="72" class="t mid">jumps to the larger blob</text>
+  <rect x="160" y="250" width="40" height="20" class="box"/>
+  <text x="210" y="265" class="tm">robot camera, narrow view</text>
+  <!-- right arena -->
+  <rect x="380" y="50" width="320" height="150" class="box-p"/>
+  <line x1="380" y1="50" x2="560" y2="130" class="ln-cam"/>
+  <line x1="700" y1="50" x2="560" y2="130" class="ln-cam"/>
+  <line x1="540" y1="200" x2="560" y2="130" class="ln-cam"/>
+  <rect x="374" y="44" width="12" height="12" class="f-cam"/>
+  <rect x="694" y="44" width="12" height="12" class="f-cam"/>
+  <rect x="374" y="194" width="12" height="12" class="f-cam"/>
+  <rect x="694" y="194" width="12" height="12" class="f-cam"/>
+  <rect x="534" y="44" width="12" height="12" class="f-cam"/>
+  <rect x="534" y="194" width="12" height="12" class="f-cam"/>
+  <circle cx="480" cy="112" r="6" class="f-ink"/>
+  <circle cx="660" cy="112" r="6" class="f-ink"/>
+  <circle cx="560" cy="130" r="8" class="f-bee"/>
+  <circle cx="560" cy="130" r="15" class="ln-bee"/>
+  <text x="480" y="134" class="tm mid">ID 1</text>
+  <text x="660" y="134" class="tm mid">ID 3</text>
+  <text x="584" y="126" class="ty">ID 2, selected</text>
+  <line x1="600" y1="250" x2="565" y2="147" class="ln-bee dash"/>
+  <rect x="580" y="250" width="40" height="20" class="box"/>
+  <text x="570" y="265" class="tm end">robot follows ID 2 only</text>
+  <rect x="380" y="282" width="10" height="10" class="f-cam"/>
+  <text x="396" y="291" class="tm">fixed tracking camera</text>
+</svg>
+</div>
+<figcaption><b>Figure 1.</b> The difference in one picture. Today the robot decides what to follow from its own narrow view. In the proposal, cameras fixed to the arena identify every bee, and the robot is told which one to follow.</figcaption>
+</figure>
+</section>
+
+<section>
+<h2><span class="n">4</span>The idea</h2>
+<div class="text">
+<p>The principle is the one used in optical motion capture. Several calibrated cameras look at the same volume from known positions. Each camera sees a bee as a point in its image, and that point defines a straight line from the lens into the arena. Where the lines from several cameras meet is the bee's position in 3D. Motion-capture systems use reflective markers and infrared flashes for this. Here the bees themselves are the objects, so no markers are needed.</p>
+<p>Three properties make this useful for the robot:</p>
+<ul>
+  <li><b>It sees everything.</b> Every bee in the arena is tracked all the time, including the ones the robot is not looking at.</li>
+  <li><b>It keeps identities.</b> Each bee gets an ID in the first frame and keeps it, because the system remembers where each bee was and where it was heading.</li>
+  <li><b>It does not move.</b> The cameras are bolted to the arena, so their measurements are not disturbed by the robot's motion or vibration.</li>
+</ul>
+<p>The whole-arena system does not replace the robot's stereo camera. The two work in stages: the arena system answers "which bee, where, how fast, how far", and the robot's own camera, which is much closer to the bee, does the last millimetres of centring and focus.</p>
+</div>
+</section>
+
+<section>
+<h2><span class="n">5</span>How I picture the system</h2>
+
+<h3>5.1 Architecture</h3>
+<figure>
+<div class="fig">
+<svg viewBox="0 0 760 380" role="img" aria-label="Data flow: a trigger source synchronises camera nodes, which send 2D points to a tracking server. The server sends the selected bee's position, velocity and distance to the robot and exchanges tracks and selection with the control software.">
+  <defs>
+    <marker id="a3" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" class="f-ink"/></marker>
+    <marker id="a3m" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" class="f-m"/></marker>
+  </defs>
+  <!-- trigger -->
+  <rect x="20" y="20" width="200" height="50" class="box-m"/>
+  <text x="120" y="42" class="tb mid">Trigger source</text>
+  <text x="120" y="59" class="tm mid">one pulse per frame, 60 Hz</text>
+  <line x1="120" y1="70" x2="120" y2="128" class="ln-m" marker-end="url(#a3m)"/>
+  <text x="130" y="104" class="tm">sync pulse</text>
+  <path d="M220,45 H655 V128" class="ln-m dash" marker-end="url(#a3m)"/>
+  <text x="440" y="37" class="tm mid">shared trigger for the robot's stereo camera (optional)</text>
+  <!-- cameras -->
+  <rect x="20" y="130" width="200" height="100" class="box"/>
+  <rect x="20" y="130" width="6" height="100" class="f-cam"/>
+  <text x="124" y="154" class="tb mid">Camera nodes (N)</text>
+  <text x="124" y="174" class="t mid">one small computer per</text>
+  <text x="124" y="190" class="t mid">two infrared cameras</text>
+  <text x="124" y="212" class="tm mid">find bees in their own images</text>
+  <!-- server -->
+  <rect x="290" y="130" width="200" height="100" class="box"/>
+  <text x="390" y="154" class="tb mid">Tracking server</text>
+  <text x="390" y="174" class="t mid">triangulate 3D points</text>
+  <text x="390" y="190" class="t mid">assign and keep IDs</text>
+  <text x="390" y="206" class="t mid">filter and predict motion</text>
+  <!-- robot -->
+  <rect x="560" y="130" width="180" height="100" class="box"/>
+  <rect x="734" y="130" width="6" height="100" class="f-bee"/>
+  <text x="647" y="154" class="tb mid">Camera robot (existing)</text>
+  <text x="647" y="174" class="t mid">rail, tilt, focus motor</text>
+  <text x="647" y="190" class="t mid">stereo camera refines</text>
+  <text x="647" y="212" class="tm mid">centring and focus</text>
+  <!-- ui -->
+  <rect x="290" y="300" width="200" height="64" class="box"/>
+  <text x="390" y="324" class="tb mid">Control software</text>
+  <text x="390" y="342" class="t mid">3D view, click to select,</text>
+  <text x="390" y="357" class="t mid">live speed, camera feeds</text>
+  <!-- arrows -->
+  <line x1="220" y1="170" x2="288" y2="170" class="ln" marker-end="url(#a3)"/>
+  <text x="215" y="252" class="t mid">2D pixel points</text>
+  <text x="215" y="268" class="tm mid">+ frame time, over Ethernet</text>
+  <line x1="255" y1="240" x2="255" y2="176" class="ln-m dash"/>
+  <line x1="490" y1="160" x2="558" y2="160" class="ln" marker-end="url(#a3)"/>
+  <line x1="560" y1="200" x2="492" y2="200" class="ln" marker-end="url(#a3)"/>
+  <text x="535" y="252" class="t">out: target position,</text>
+  <text x="535" y="268" class="t">velocity, distance</text>
+  <text x="535" y="284" class="tm">back: rail and tilt position</text>
+  <line x1="525" y1="240" x2="525" y2="206" class="ln-m dash"/>
+  <line x1="370" y1="230" x2="370" y2="298" class="ln" marker-end="url(#a3)"/>
+  <line x1="410" y1="300" x2="410" y2="232" class="ln" marker-end="url(#a3)"/>
+  <text x="362" y="270" class="tm end">tracks</text>
+  <text x="418" y="270" class="tm">selected ID</text>
+</svg>
+</div>
+<figcaption><b>Figure 2.</b> Data flow. Camera nodes send only coordinates, never images. The server turns them into tracked 3D positions. The robot receives data for the selected bee and reports its own rail and tilt position back.</figcaption>
+</figure>
+
+<div class="text">
+<h3>5.2 Camera nodes</h3>
+<p>Each node is one small computer with two cameras attached, so 16 cameras need 8 nodes. The two cameras of a node are neighbours, because camera ribbon cables are short. The node finds the bees in both images and sends a short message per camera and frame: its node ID, the camera ID, the time the frame was taken, and the pixel coordinates of every bee that camera sees. A single camera cannot know how far away a bee is, so it sends image positions only. Distance comes from combining cameras on the server.</p>
+<p>Sending coordinates in place of images keeps messages to a few bytes and keeps delay short and predictable. Jeremy describes in his third video why unpredictable transfer times are a problem for prediction. Wired Ethernet with small UDP packets avoids most of that, and one cable can also carry power (PoE).</p>
+<p>Sharing a computer has two consequences for the design. A node has to process two images within one frame time, and when a node fails, two neighbouring cameras disappear together. The layout should tolerate that.</p>
+
+<h3>5.3 Synchronisation</h3>
+<p>All cameras must expose at the same instant. A bee at 5 m/s moves about 8 mm in a tenth of a frame at 60 Hz, so unsynchronised cameras would place it at different points. A single trigger source sends one pulse per frame to every camera. Because every frame then has an exact time, the server can predict cleanly from it.</p>
+
+<h3>5.4 Infrared for tracking, visible light for filming</h3>
+<p>The tracking cameras would work in near infrared, around 850 nm, with infrared LEDs lighting the arena and an infrared-pass filter on each lens. The reasoning:</p>
+<ul>
+  <li>Bumblebees do not see near infrared, so the light should not influence their behaviour.</li>
+  <li>The cinema camera has an infrared-blocking filter, so the colour picture is unaffected.</li>
+  <li>The large film lights are LEDs and emit very little infrared, so the filters remove most of their glare from the tracking images.</li>
+  <li>Acrylic is transparent to near infrared, so cameras could also sit outside the chamber. This differs from the thermal camera Jeremy tried, which works at much longer wavelengths that acrylic blocks.</li>
+</ul>
+<p>With a fixed background, detection can start simple: subtract the empty arena and look for moving blobs. A trained detector can come later if needed.</p>
+<p>The black background the filmmakers want does not rule infrared out. What counts is the contrast between bee and background in the infrared image, and there are two ways to get it:</p>
+<ul>
+  <li><b>Bright bee, dark background.</b> The black must also be dark in infrared. That is usually the case for materials coloured with carbon black, such as many matt black paints and flock foils.</li>
+  <li><b>Dark bee, bright background.</b> Many black-dyed synthetic fabrics and black anodised aluminium are bright in infrared. The cinema camera would see black, and the tracking cameras would see dark bees against a bright surface. Silhouettes like this are a common method in insect research.</li>
+</ul>
+<p>How a material behaves in infrared cannot be seen by eye and has to be tested per product with an infrared camera. I also do not know yet how bright a bumblebee itself is at 850 nm.</p>
+<p>With cameras all around the arena, every camera has its own background. Often it is the transparent wall opposite and the room behind it. Sides that are not filmed through should be covered, so that movement outside the chamber does not disturb detection.</p>
+<p><b>Colour as the alternative.</b> Jeremy's tracker finds the yellow of the bee, which is simple and needs no extra light. For cameras all around the arena I plan with infrared for now: cameras facing the film lights would be dazzled, the acrylic reflects the lamps, the yellow is probably not equally visible from every direction, and tracking would depend on how the scene is lit for filming. Detection is an exchangeable module. Triangulation, IDs and prediction only receive points and do not depend on how the points were found.</p>
+</div>
+
+<h3>5.5 Camera placement</h3>
+<div class="text">
+<p>My starting point is one camera in every corner, aimed at the centre of the arena. Corners give very different viewing angles onto the same bee, which is what makes the 3D position accurate, and they keep the cameras out of the film camera's picture.</p>
+<p>The chamber is long and narrow. Cameras at the two ends are far from the middle, so I would add cameras along the long edges. More cameras also give redundancy: if one is blocked, covered by a bee, or fails, the others still see the bee.</p>
+<p>Each corner camera needs a wide lens of roughly 110° or more to cover the volume. Wide lenses distort the image, so calibration has to use a fisheye model.</p>
+
+</div>
+<figure>
+<div class="fig">
+<svg viewBox="0 0 720 380" role="img" aria-label="Oblique view of the long flight chamber with cameras in all eight corners and additional cameras along the long edges. Lines of sight from all sixteen cameras meet at the selected bee. The camera robot runs on a rail in front.">
+  <!-- back face -->
+  <rect x="150" y="60" width="480" height="140" class="ln-m"/>
+  <!-- connectors -->
+  <line x1="80" y1="110" x2="150" y2="60" class="ln-m"/>
+  <line x1="560" y1="110" x2="630" y2="60" class="ln"/>
+  <line x1="80" y1="250" x2="150" y2="200" class="ln-m"/>
+  <line x1="560" y1="250" x2="630" y2="200" class="ln"/>
+  <line x1="150" y1="60" x2="630" y2="60" class="ln"/>
+  <line x1="630" y1="60" x2="630" y2="200" class="ln"/>
+  <!-- rays -->
+  <g class="ln-cam" stroke-width="1" opacity=".8">
+    <line x1="80" y1="110" x2="360" y2="160"/>
+    <line x1="560" y1="110" x2="360" y2="160"/>
+    <line x1="80" y1="250" x2="360" y2="160"/>
+    <line x1="560" y1="250" x2="360" y2="160"/>
+    <line x1="150" y1="60" x2="360" y2="160"/>
+    <line x1="630" y1="60" x2="360" y2="160"/>
+    <line x1="150" y1="200" x2="360" y2="160"/>
+    <line x1="630" y1="200" x2="360" y2="160"/>
+    <line x1="240" y1="110" x2="360" y2="160"/>
+    <line x1="400" y1="110" x2="360" y2="160"/>
+    <line x1="240" y1="250" x2="360" y2="160"/>
+    <line x1="400" y1="250" x2="360" y2="160"/>
+    <line x1="310" y1="60" x2="360" y2="160"/>
+    <line x1="470" y1="60" x2="360" y2="160"/>
+    <line x1="310" y1="200" x2="360" y2="160"/>
+    <line x1="470" y1="200" x2="360" y2="160"/>
+  </g>
+  <!-- front face -->
+  <rect x="80" y="110" width="480" height="140" class="ln"/>
+  <!-- corner cameras -->
+  <rect x="74" y="104" width="12" height="12" class="f-cam"/><rect x="554" y="104" width="12" height="12" class="f-cam"/>
+  <rect x="74" y="244" width="12" height="12" class="f-cam"/><rect x="554" y="244" width="12" height="12" class="f-cam"/>
+  <rect x="144" y="54" width="12" height="12" class="f-cam"/><rect x="624" y="54" width="12" height="12" class="f-cam"/>
+  <rect x="144" y="194" width="12" height="12" class="f-cam"/><rect x="624" y="194" width="12" height="12" class="f-cam"/>
+  <!-- edge cameras -->
+  <circle cx="240" cy="110" r="5.5" class="f-cam"/><circle cx="400" cy="110" r="5.5" class="f-cam"/>
+  <circle cx="240" cy="250" r="5.5" class="f-cam"/><circle cx="400" cy="250" r="5.5" class="f-cam"/>
+  <circle cx="310" cy="60" r="5.5" class="f-cam"/><circle cx="470" cy="60" r="5.5" class="f-cam"/>
+  <circle cx="310" cy="200" r="5.5" class="f-cam"/><circle cx="470" cy="200" r="5.5" class="f-cam"/>
+  <!-- bees -->
+  <circle cx="200" cy="190" r="4" class="f-ink"/><circle cx="500" cy="150" r="4" class="f-ink"/>
+  <circle cx="360" cy="160" r="7" class="f-bee"/><circle cx="360" cy="160" r="13" class="ln-bee"/>
+  <!-- robot -->
+  <line x1="60" y1="318" x2="560" y2="318" class="ln"/>
+  <rect x="300" y="296" width="44" height="22" class="box"/>
+  <line x1="330" y1="296" x2="356" y2="175" class="ln-bee dash"/>
+  <text x="570" y="322" class="tm">rail</text>
+  <text x="290" y="312" class="tm end">camera robot</text>
+  <!-- labels -->
+  <text x="390" y="40" class="tm mid">arena about 90 × 30 × 30 cm</text>
+  <rect x="80" y="338" width="10" height="10" class="f-cam"/><text x="96" y="347" class="tm">corner camera</text>
+  <circle cx="215" cy="343" r="5" class="f-cam"/><text x="226" y="347" class="tm">added camera along a long edge</text>
+  <line x1="440" y1="343" x2="466" y2="343" class="ln-cam"/><text x="472" y="347" class="tm">line of sight to the bee</text>
+  <circle cx="85" cy="365" r="4" class="f-bee"/><circle cx="85" cy="365" r="8" class="ln-bee"/><text x="100" y="369" class="tm">selected bee</text>
+  <circle cx="215" cy="365" r="4" class="f-ink"/><text x="226" y="369" class="tm">other bees</text>
+</svg>
+</div>
+<figcaption><b>Figure 3.</b> Example layout with 16 cameras on 8 nodes: one camera in each corner and two more along each long edge. In open space every camera has a line of sight to the bee, so far more than the required three agree. Top cameras look down and bottom cameras look up. The right number and positions are a question for the simulation.</figcaption>
+</figure>
+<div class="text">
+<h3>5.6 Hardware I am assuming</h3>
+<p>I do not have the resources to build this, so the hardware below is an assumption used to give the simulation realistic numbers. All of it is inexpensive, off-the-shelf equipment.</p>
+</div>
+<div class="tablewrap">
+<table>
+<thead><tr><th style="width:26%">Part</th><th style="width:34%">Assumption</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Tracking camera</td><td>Raspberry Pi Global Shutter Camera class: Sony IMX296, 1456 × 1088 px, about 60 fps, monochrome, external trigger input</td><td>Global shutter avoids skewed images of fast bees and makes synchronisation simple. Very short exposures are possible with enough light.</td></tr>
+<tr><td>Lens and filter</td><td>Wide-angle lens, about 110°, with an 850 nm infrared-pass filter</td><td>Covers the arena from a corner and removes the visible film lights.</td></tr>
+<tr><td>Camera node</td><td>One Raspberry Pi 5 class computer per two cameras. It has two camera ports.</td><td>Halves the number of computers: 8 nodes for 16 cameras. Runs detection for both images locally and sends coordinates.</td></tr>
+<tr><td>Trigger</td><td>A microcontroller that outputs one pulse per frame</td><td>Raspberry Pi documents this method for synchronising several global-shutter cameras.</td></tr>
+<tr><td>Network</td><td>Wired Ethernet, UDP, optionally PoE</td><td>Short, predictable delay. One cable per node.</td></tr>
+<tr><td>Tracking server</td><td>An ordinary computer on the same network</td><td>The load is small: 16 cameras on 8 nodes × 20 bees × 60 Hz is about 19,000 points per second.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2><span class="n">6</span>The tracking pipeline</h2>
+<div class="text">
+<h3>6.1 From pixels to lines</h3>
+<p>The server knows each camera's position, orientation and lens model from calibration. With that it converts every received pixel coordinate into a line in arena coordinates.</p>
+
+<h3>6.2 From lines to 3D points</h3>
+<p>Because of measurement noise, lines from different cameras never meet exactly. The server looks for places where lines pass within a few millimetres of each other and takes the point closest to all of them.</p>
+<p>With several bees there is a trap. Lines that belong to different bees can cross by chance at a place where no bee is. I call these ghost points. A point therefore only counts as a bee if at least three cameras agree on it.</p>
+</div>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 720 300" role="img" aria-label="Top view with three cameras and two bees. Lines from the two lower cameras cross at the two real bees and at two false points. The third camera has no line through the false points, so they are rejected.">
+  <rect x="60" y="50" width="600" height="200" class="box-p"/>
+  <!-- rays from C1 and C2 -->
+  <line x1="60" y1="250" x2="560" y2="50" class="ln-cam"/>
+  <line x1="60" y1="250" x2="660" y2="130" class="ln-cam"/>
+  <line x1="660" y1="250" x2="60" y2="130" class="ln-cam"/>
+  <line x1="660" y1="250" x2="160" y2="50" class="ln-cam"/>
+  <!-- C3 rays -->
+  <line x1="360" y1="50" x2="260" y2="170" class="ln-cam"/>
+  <line x1="360" y1="50" x2="460" y2="170" class="ln-cam"/>
+  <line x1="360" y1="50" x2="360" y2="210" class="ln-m dash"/>
+  <!-- ghosts -->
+  <circle cx="360" cy="130" r="8" class="box-p dash"/>
+  <circle cx="360" cy="190" r="8" class="box-p dash"/>
+  <!-- bees -->
+  <circle cx="260" cy="170" r="8" class="f-bee"/>
+  <circle cx="460" cy="170" r="8" class="f-bee"/>
+  <text x="72" y="186" class="ty">bee A: 3 lines</text>
+  <text x="648" y="186" class="ty end">bee B: 3 lines</text>
+  <text x="360" y="274" class="t mid">dashed circles are ghost points: only 2 lines cross</text>
+  <text x="360" y="291" class="tm mid">camera 3 sees nothing along the dashed line</text>
+  <!-- cameras -->
+  <rect x="53" y="243" width="14" height="14" class="f-cam"/><text x="60" y="276" class="tc mid">camera 1</text>
+  <rect x="653" y="243" width="14" height="14" class="f-cam"/><text x="660" y="276" class="tc mid">camera 2</text>
+  <rect x="353" y="43" width="14" height="14" class="f-cam"/><text x="360" y="34" class="tc mid">camera 3</text>
+</svg>
+</div>
+<figcaption><b>Figure 4.</b> Why three cameras must agree. With two cameras and two bees, the four lines cross at four places and two of them are false. A third camera confirms the real bees and has no line through the ghosts.</figcaption>
+</figure>
+
+<div class="text">
+<p>Three cameras make ghosts much rarer but do not exclude them. With many bees, three lines from three different bees can still nearly meet. Four more safeguards work together with the three-camera rule:</p>
+<ul>
+  <li><b>Every detection counts once.</b> A point in a camera image may belong to only one bee. The server accepts the 3D points with the most supporting cameras first. A ghost would need detections that already belong to a real bee and drops out.</li>
+  <li><b>Known bees first.</b> The server knows from prediction where every tracked bee should be and assigns detections to those tracks first. Only what is left over can become a new bee.</li>
+  <li><b>Probation.</b> A new point gets an ID only after it has been present for several frames in a row and moves like a bee. Ghosts usually appear for one or two frames and then jump away.</li>
+  <li><b>More than three where possible.</b> With 8 to 16 cameras, five or more typically see the same bee. The threshold can depend on how many cameras should be able to see that place.</li>
+</ul>
+<p>How often a ghost still gets through depends on the number of bees and the tolerance. The simulation can measure that.</p>
+
+<h3>6.3 IDs and motion state</h3>
+<p>For every bee the server keeps a track: its ID, current position, velocity and acceleration. A Kalman filter with an acceleration model is the standard tool for this. In every frame it predicts where each known bee should now be, and the new 3D points are assigned to the nearest predictions (the Hungarian algorithm does this assignment for all bees at once). A bee keeps its ID because its new position fits its own prediction better than anyone else's.</p>
+<p>If a bee is hidden for a few frames, its track continues on prediction alone and picks the bee up again when it reappears.</p>
+
+<h3>6.4 Prediction</h3>
+<p>The same filter can state where a bee will be at any moment in the near future. That is the value the robot needs, because every measurement is already slightly old when it arrives. Jeremy calls the use of this value feed forward.</p>
+<p>The state also shows what the bee is doing. A bee with near-zero velocity is sitting or walking, and a bee with high velocity or sudden acceleration is flying. That signal could switch the robot's dead zone and focus update rate automatically.</p>
+
+<h3>6.5 Expected accuracy</h3>
+<p>A rough estimate with the assumed camera: at 50 cm distance, with two cameras 30 cm apart and detection accurate to half a pixel, the position error is about 1 mm. More cameras improve this. A bumblebee of 15 mm at that distance covers about 15 pixels, enough to detect reliably. These numbers are estimates from geometry, and checking them is one purpose of the simulation.</p>
+<p>About 1 mm is enough to aim the robot, predict motion and preset focus. It is not enough for final macro focus on its own, which is why the robot's close-range stereo camera stays in charge of that.</p>
+</div>
+</section>
+
+<section>
+<h2><span class="n">7</span>Handing the bee to the robot</h2>
+<div class="text">
+<h3>7.1 A search window in the robot's own image</h3>
+<p>The server projects the predicted 3D position of the selected bee into the image of the robot's stereo camera. The robot's vision then searches only a small window around that point and ignores everything outside it. If the window contains a bee, the robot uses its own measurement to centre, because it is closer and faster. If the window is empty, or the detection suddenly jumps, the robot follows the prediction until the bee reappears. When the two systems disagree, the whole-arena system decides.</p>
+<p>A smaller search area should also help the robot's vision keep its 60 Hz rate at all times, and possibly exceed it.</p>
+</div>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 720 280" role="img" aria-label="Left: the robot's stereo image with a search window around the predicted position of the selected bee, and a larger bee outside the window that is ignored. Right: the two stages, whole-arena system for identity and coarse position, robot stereo camera for fine centring and fine focus.">
+  <defs>
+    <marker id="a5" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" class="f-ink"/></marker>
+  </defs>
+  <text x="30" y="24" class="tb">Robot's stereo image</text>
+  <rect x="30" y="40" width="300" height="200" class="box-p"/>
+  <circle cx="110" cy="180" r="20" class="f-m"/>
+  <text x="110" y="222" class="tm mid">larger blob, ignored</text>
+  <circle cx="270" cy="80" r="7" class="f-m"/>
+  <circle cx="214" cy="126" r="10" class="f-bee"/>
+  <circle cx="206" cy="120" r="40" class="ln-bee dash"/>
+  <line x1="196" y1="120" x2="216" y2="120" class="ln"/><line x1="206" y1="110" x2="206" y2="130" class="ln"/>
+  <text x="206" y="68" class="ty mid">search window</text>
+  <text x="34" y="258" class="tm">cross: predicted position from the arena system</text>
+  <!-- stages -->
+  <rect x="400" y="40" width="290" height="78" class="box"/>
+  <rect x="400" y="40" width="6" height="78" class="f-cam"/>
+  <text x="418" y="62" class="tb">Stage 1: whole-arena system</text>
+  <text x="418" y="82" class="t">which bee, where, how fast, how far</text>
+  <text x="418" y="100" class="tm">about 1 mm (estimate), all bees, always</text>
+  <line x1="545" y1="118" x2="545" y2="160" class="ln" marker-end="url(#a5)"/>
+  <text x="555" y="144" class="tm">search window, coarse focus</text>
+  <rect x="400" y="162" width="290" height="78" class="box"/>
+  <rect x="400" y="162" width="6" height="78" class="f-bee"/>
+  <text x="418" y="184" class="tb">Stage 2: robot's stereo camera</text>
+  <text x="418" y="204" class="t">fine centring and fine focus</text>
+  <text x="418" y="222" class="tm">about 15 cm from the bee, one bee</text>
+</svg>
+</div>
+<figcaption><b>Figure 5.</b> Two-stage tracking. The arena system keeps the robot on the right bee and the robot's own camera does the precise work inside a small window.</figcaption>
+</figure>
+
+<div class="text">
+<p>The window alone is not enough. If the robot kept choosing the largest blob, a larger bee flying through the window would still take over. Inside the window the robot therefore checks three things:</p>
+<ul>
+  <li><b>Nearest, not largest.</b> The robot takes the blob closest to the predicted point. A bee passing through is near that point for only a few frames.</li>
+  <li><b>The distance must fit.</b> A bee usually looks larger because it is closer to the lens. The stereo camera measures the distance of every blob, and the arena system knows the distance of the target. A blob at the wrong distance cannot be the target.</li>
+  <li><b>The other bees are known too.</b> The arena system tracks every bee, so it also projects the bees that are about to cross the robot's view into the image. The robot knows in advance that a blob belongs to another ID.</li>
+</ul>
+<p>If another bee hides the target from the robot, the distance check rejects the measurement and the robot follows the prediction until the target is free again. The fixed cameras usually still see the target, because they look from other directions. Focus stays on the target's distance throughout, so a bee passing in front is out of focus.</p>
+</div>
+
+
+<div class="text">
+<h3>7.2 Focus</h3>
+<p>My current view is that focus should stay with the robot's stereo camera during normal tracking, because at about 15 cm it measures distance more precisely than cameras in the corners can. The arena system adds three things:</p>
+<ul>
+  <li><b>Preset on selection.</b> When the operator clicks a new bee, the distance from the lens to that bee is already known. Focus moves to it while the camera is still swinging over, so the bee arrives nearly sharp.</li>
+  <li><b>Fallback.</b> If the stereo camera loses the bee briefly, the arena distance keeps focus approximately right.</li>
+  <li><b>Lead.</b> Predicted distance lets focus move ahead of a bee that flies toward or away from the camera.</li>
+</ul>
+
+<h3>7.3 Timing with a high-speed camera</h3>
+<p>The cinema camera may record thousands of frames per second while tracking runs at 60 Hz. That is not a conflict, because the cinema camera takes no part in tracking. It only records. What has to match is the tracking cameras and the robot's stereo camera, both near 60 Hz, ideally on the same trigger.</p>
+</div>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 720 190" role="img" aria-label="Three time lanes: tracking measurements every 16.7 milliseconds, motor control about every millisecond, and the cinema camera recording continuously at thousands of frames per second. Prediction fills the time between tracking measurements.">
+  <defs>
+    <marker id="a6" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" class="f-bee"/></marker>
+  </defs>
+  <text x="20" y="44" class="t">Tracking cameras</text><text x="20" y="60" class="tm">60 Hz</text>
+  <text x="20" y="104" class="t">Motor control</text><text x="20" y="120" class="tm">about 1 kHz</text>
+  <text x="20" y="164" class="t">Cinema camera</text><text x="20" y="180" class="tm">thousands of fps</text>
+  <line x1="170" y1="50" x2="700" y2="50" class="ln-m"/>
+  <g class="ln-cam" stroke-width="3">
+    <line x1="180" y1="34" x2="180" y2="66"/><line x1="280" y1="34" x2="280" y2="66"/><line x1="380" y1="34" x2="380" y2="66"/>
+    <line x1="480" y1="34" x2="480" y2="66"/><line x1="580" y1="34" x2="580" y2="66"/><line x1="680" y1="34" x2="680" y2="66"/>
+  </g>
+  <text x="230" y="28" class="tm mid">16.7 ms</text>
+  <line x1="184" y1="24" x2="210" y2="24" class="ln-m"/><line x1="250" y1="24" x2="276" y2="24" class="ln-m"/>
+  <line x1="170" y1="110" x2="700" y2="110" class="ln-m"/>
+  <line x1="180" y1="110" x2="686" y2="110" stroke-width="16" stroke-dasharray="1.5 4.5" class="ln"/>
+  <path d="M384,66 Q430,84 470,100" class="ln-bee" marker-end="url(#a6)"/>
+  <text x="492" y="88" class="ty">prediction fills the gap</text>
+  <rect x="180" y="158" width="506" height="16" class="f-m" opacity=".55"/>
+  <text x="433" y="150" class="tm mid">records only, takes no part in tracking</text>
+</svg>
+</div>
+<figcaption><b>Figure 6.</b> Different rates side by side. The filter can be asked for the bee's position at any instant, so motor control can run much faster than the cameras.</figcaption>
+</figure>
+
+<div class="text">
+<h3>7.4 Messages</h3>
+<p>Three small messages carry everything. Field names are a first proposal. A node sends one detections message per camera and frame.</p>
+</div>
+<div class="tablewrap">
+<table>
+<thead><tr><th style="width:22%">Message</th><th style="width:22%">From → to</th><th>Content</th></tr></thead>
+<tbody>
+<tr><td>Detections</td><td>Camera node → server</td><td class="mono">node_id, camera_id, frame_time, bees [ (u, v, blob_size), … ], markers [ (marker_id, u, v), … ]</td></tr>
+<tr><td>Target</td><td>Server → robot</td><td class="mono">track_id, time, position (x, y, z), velocity, acceleration, distance_to_lens, confidence, others_in_view [ (track_id, position), … ]</td></tr>
+<tr><td>Robot pose</td><td>Robot → server</td><td class="mono">time, rail_position, tilt_angle, focus_position</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2><span class="n">8</span>Calibration</h2>
+<div class="text">
+<p>Jeremy describes stereo calibration as the part of his project he dreaded most. The calibration here should therefore be simple and use things that are already there. I assume that the robot's dimensions are known from its CAD model and that the robot stands in a fixed place relative to the arena.</p>
+<p>One tool does everything: a small LED on a stick.</p>
+<h3>8.1 Tracking cameras</h3>
+<p>The LED is moved through the whole arena while all cameras record. Every camera sees the same point at the same time, from every direction, which a checkerboard cannot offer when cameras face each other. From these observations the positions and orientations of all cameras are computed together (bundle adjustment). This is how commercial motion-capture systems are calibrated.</p>
+<h3>8.2 Robot position and focus in one pass</h3>
+<p>The LED is then held at 10 to 20 places in the arena. At each place the operator centres it in the cinema camera's picture and focuses on it with focus peaking, the way Jeremy already does for his focus curve. The system stores three things per place: the LED's 3D position from the tracking cameras, the robot's rail and tilt readings, and the focus motor position.</p>
+<p>A least-squares fit over these points gives the robot's exact position and orientation in arena coordinates. The same points give a focus curve that maps arena distance straight to focus motor position. That removes the question of which physical point on the lens the distance is measured from, and nothing has to be measured with calipers.</p>
+<h3>8.3 Wall markers as a permanent check</h3>
+<p>The researchers recommend a faint dot pattern on the chamber walls so that bees see the walls and do not collide with them. These dots can serve a second purpose. They are fixed marks at known positions, so every camera can check continuously whether it still sees them where calibration says they should be. If a camera is bumped, the system notices at once, reports which camera it is, and can correct that camera's pose from the marks.</p>
+<p>A regular dot pattern is ambiguous, because one dot looks like the next. A few unique marks between the dots, for example small ArUco codes, would resolve that. Whether such marks are acceptable for the bees and for the picture is an open question.</p>
+</div>
+</section>
+
+<section>
+<h2><span class="n">9</span>What the control software should do</h2>
+<div class="text">
+<ul>
+  <li>Show the arena in 3D with every tracked bee, its ID, a short trail of its recent path and its predicted position.</li>
+  <li>Let the operator select a bee with a click. The robot swings to it and presets focus.</li>
+  <li>Show live values for the selected bee: speed, acceleration (smoothed for display), distance to the lens, and whether it is sitting or flying.</li>
+  <li>Show the cinema camera's live picture, and each tracking camera's view with a box and ID on every detected bee, so that it is visible that tracking works.</li>
+  <li>Show system health: how many cameras currently see each bee, which cameras or nodes are not delivering, and which cameras have drifted from their calibration.</li>
+  <li>Guide the operator through the two calibration passes.</li>
+</ul>
+</div>
+</section>
+
+<section>
+<h2><span class="n">10</span>Proof of concept: a hardware-faithful simulation</h2>
+<div class="text">
+<p>Since I cannot build the hardware, the first goal is a proof of concept in software that is more than a sketch: the real tracking software, running against a simulation that behaves like the hardware would. The two parts are separate programs and talk to each other with the same network messages real camera nodes and a real robot would use. In principle the simulator could later be swapped for hardware without changing the tracking software.</p>
+<p>A simulation has one advantage real bees never offer. It knows the true position and identity of every bee at every moment, so tracking errors and ID swaps can be counted exactly.</p>
+</div>
+
+<figure>
+<div class="fig">
+<svg viewBox="0 0 760 320" role="img" aria-label="The simulator stands in for bees, cameras and robot and exchanges the same network messages with the tracking and control software that real hardware would. Ground truth from the simulator and tracks from the software are compared to produce metrics.">
+  <defs>
+    <marker id="a7" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" class="f-ink"/></marker>
+    <marker id="a7m" markerWidth="9" markerHeight="8" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" class="f-m"/></marker>
+  </defs>
+  <rect x="20" y="20" width="270" height="180" class="box"/>
+  <text x="36" y="44" class="tb">Window 1: simulator</text>
+  <text x="36" y="62" class="tm">stands in for the real world</text>
+  <text x="36" y="88" class="t">· arena shape and virtual bumblebees</text>
+  <text x="36" y="108" class="t">· virtual cameras with real resolution,</text>
+  <text x="46" y="124" class="t">field of view, frame rate, noise</text>
+  <text x="36" y="144" class="t">· robot model with speed and</text>
+  <text x="46" y="160" class="t">acceleration limits</text>
+  <text x="36" y="180" class="t">· cinema view with depth of field</text>
+  <rect x="470" y="20" width="270" height="180" class="box"/>
+  <text x="486" y="44" class="tb">Window 2: tracking and control</text>
+  <text x="486" y="62" class="tm">the software under test</text>
+  <text x="486" y="88" class="t">· triangulation and ghost rejection</text>
+  <text x="486" y="108" class="t">· IDs, Kalman filter, prediction</text>
+  <text x="486" y="128" class="t">· 3D view and bee selection</text>
+  <text x="486" y="148" class="t">· live speed and acceleration</text>
+  <text x="486" y="168" class="t">· camera feeds with overlays</text>
+  <line x1="290" y1="80" x2="468" y2="80" class="ln" marker-end="url(#a7)"/>
+  <text x="380" y="72" class="t mid">detections per camera</text>
+  <line x1="470" y1="140" x2="292" y2="140" class="ln" marker-end="url(#a7)"/>
+  <text x="380" y="132" class="t mid">target for the robot</text>
+  <text x="380" y="170" class="tm mid">same messages as</text>
+  <text x="380" y="186" class="tm mid">real hardware</text>
+  <rect x="250" y="250" width="260" height="56" class="box-m"/>
+  <text x="380" y="273" class="tb mid">Metrics</text>
+  <text x="380" y="292" class="tm mid">ID swaps · time in frame · time in focus</text>
+  <path d="M155,200 V278 H248" class="ln-m" marker-end="url(#a7m)"/>
+  <text x="165" y="240" class="tm">true positions and IDs</text>
+  <path d="M605,200 V278 H512" class="ln-m" marker-end="url(#a7m)"/>
+  <text x="595" y="240" class="tm end">estimated tracks</text>
+</svg>
+</div>
+<figcaption><b>Figure 7.</b> The proof of concept. The simulator replaces bees, cameras and robot. Comparing its ground truth with the tracker's output gives objective numbers.</figcaption>
+</figure>
+
+<div class="text">
+<h3>10.1 What the simulator should offer</h3>
+<ul>
+  <li>A window that shows what is happening, with controls for the number of bees, their flight behaviour and speed, measurement noise, camera dropouts and delay.</li>
+  <li>A 3D model of the robot that moves according to the commands it receives, within realistic speed and acceleration limits.</li>
+  <li>The cinema camera's view, rendered with a narrow field of view and blur that depends on focus distance, so it is visible whether the bee stays centred and sharp.</li>
+  <li>Optional wall markers and a control that nudges a camera out of position, to test whether the software notices and corrects it. The markers can be switched off to compare.</li>
+  <li>Repeatable runs, so the same flight can be replayed with different settings.</li>
+</ul>
+
+<h3>10.2 Configurable arena and cameras</h3>
+<p>The first arena is the rectangular chamber. Arena shape and camera placement should live in a configuration file and not in the code, so that other shapes, such as a narrow tunnel or a chamber with obstacles, and other camera layouts can be tried later. Camera models are separate entries with their own resolution, field of view, frame rate and noise.</p>
+<p>The configuration also states which two cameras share a node. The simulator then behaves like the hardware would: a node sends the messages of both its cameras, both share the node's processing delay, and a failed node removes two cameras at once.</p>
+<p>A coverage map would be a useful extra: for a grid of points in the arena, how many cameras see each point and how accurately it can be located. That answers placement questions before any bee flies.</p>
+
+<h3>10.3 Questions the simulation should answer</h3>
+<ul>
+  <li>How many cameras are needed, and where, for a given arena?</li>
+  <li>How often does a ghost point get through, and which safeguards matter most?</li>
+  <li>What happens when a whole node with two cameras fails?</li>
+  <li>How reliably is a displaced camera detected and corrected from the wall markers?</li>
+  <li>How often do IDs swap, as a function of the number of bees and how closely they pass each other?</li>
+  <li>How much of the time does the selected bee stay in the cinema frame and within the depth of field?</li>
+  <li>How much delay between exposure and motor command can the system tolerate?</li>
+</ul>
+
+<h3>10.4 Software choices so far</h3>
+<p>Python for the simulation and the tracking server, with NumPy for the geometry. The data volume is small enough for that. The work is split into separate processes for network input, tracking and display. Both windows run in the browser and use three.js for 3D. Parts that turn out to be too slow can be moved to C++ later. The robot's own software is C++ already.</p>
+</div>
+</section>
+
+<section>
+<h2><span class="n">11</span>Limits and open questions</h2>
+<div class="text">
+<ul>
+  <li><b>Bees that sit close together.</b> Bumblebees land, walk, and climb over each other. When two bees touch for a longer time, their IDs can swap, because bumblebees look alike. Small numbered tags, as used in bee research, would solve this but may not be wanted in cinematic footage.</li>
+  <li><b>The robot must know its own pose.</b> Aiming from arena coordinates relies on correct rail and tilt readings. Mechanical flex that the encoders do not see, like the 2° problem in the video, would still cause errors.</li>
+  <li><b>Integration needs Jeremy.</b> The search window, the target message and the focus preset change the robot's software. Everything up to the target message can be developed independently.</li>
+  <li><b>Cameras facing each other.</b> If infrared LEDs sit next to the lenses, opposite cameras see them as bright spots. These spots are fixed and can be masked, or the lighting can be diffuse and indirect.</li>
+  <li><b>Background in infrared.</b> Both background variants in section 5.4 depend on how the chosen black material and the bees themselves look at 850 nm. Only a test with an infrared camera can answer that.</li>
+  <li><b>Wall patterns and detection.</b> The dot pattern is static, so background subtraction should remove it, but a bee in front of a dark dot may be harder to see. The simulation cannot answer this, because its virtual cameras deliver points and not images. It needs real hardware.</li>
+  <li><b>Bees on lenses.</b> Bumblebees like corners. Cameras inside the chamber need a small cover, or they sit outside behind the acrylic and must cope with reflections.</li>
+  <li><b>Simulation is not reality.</b> Reflections, trigger jitter, real flight behaviour and calibration errors will differ from the model. A good simulation result shows that the concept and the software work in principle. It does not prove the hardware.</li>
+</ul>
+</div>
+</section>
+
+<p class="note text"><b>About this paper.</b> The idea and the design decisions are Luke Stark's. Claude, Anthropic's AI model, gave technical feedback and suggestions during the discussion, collected the facts and ideas, drew the figures and wrote the text.</p>
+
+<p class="note text" style="margin-top:6px">Sources: Jeremy Fielding's "Engineer vs Bee" video series (rounds 1 to 3 and the tracking test video) for the robot, the arena and the measured values quoted in sections 2 and 3. Raspberry Pi's documentation for the Global Shutter Camera for sensor, resolution and external trigger. All accuracy and data-rate figures for the proposed system are my own estimates.</p>
+
+</main>
+</body>
+</html>
