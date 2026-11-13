@@ -139,9 +139,19 @@ const ROBOT_LIMIT_NAMES = ["rail_max_speed_m_s", "rail_max_acceleration_m_s2",
 const CONTROL_NAMES = ["bee_count", "max_speed_m_s", "pixel_sigma_px",
                        "dropout_probability", "time_scale", ...ROBOT_LIMIT_NAMES];
 const ROBOT_COLOR = 0x7c3aed;
-const RAIL_THICKNESS_M = 0.01;         // display only
-const CARRIAGE_SIZE_M = [0.05, 0.03, 0.03];    // display only
-const LENS_SIZE_M = [0.03, 0.08, 0.03];        // display only, long side along the view axis
+// Sizes and colours of the robot model, display only. The real dimensions are not known;
+// only the rail position, the tilt axis and the focus distance come from the simulation.
+const RAIL_COLOR = 0x6b7280, BODY_COLOR = 0x1f2933, LENS_COLOR = 0x4b5563;
+const RAIL_THICKNESS_M = 0.008;
+const RAIL_GAUGE_M = 0.04;                     // distance between the two rail bars
+const CARRIAGE_SIZE_M = [0.08, 0.06, 0.01];    // plate on the rail
+const YOKE_HEIGHT_M = 0.04;                    // tilt axis above the plate
+const YOKE_THICKNESS_M = 0.006;
+const BODY_SIZE_M = [0.05, 0.05, 0.04];        // camera body, behind the tilt axis
+const LENS_RADIUS_M = 0.014;
+const LENS_LENGTH_M = 0.06;
+const HOOD_RADIUS_M = 0.018;
+const HOOD_LENGTH_M = 0.015;
 const CINEMA_SEND_INTERVAL_MS = 66;    // about 15 images per second to the control window
 const CINEMA_JPEG_QUALITY = 0.7;
 const CINEMA_BACKGROUND = "#dfe7d8";
@@ -245,25 +255,68 @@ function buildCamera(cam) {
   cameraGroup.add(group);
 }
 
-// Build the robot: a rail along x, a carriage on it and a camera head that tilts.
-function buildRobot(robot) {
-  clearGroup(robotGroup);
-  const material = new THREE.MeshStandardMaterial({ color: ROBOT_COLOR });
-  const rail = new THREE.Mesh(
-    new THREE.BoxGeometry(robot.rail_length_m, RAIL_THICKNESS_M, RAIL_THICKNESS_M), material);
-  rail.position.set(robot.rail_start_m[0] + robot.rail_length_m / 2, robot.rail_start_m[1],
-                    robot.rail_start_m[2] - CARRIAGE_SIZE_M[2]);
+// Add a box of the given size (x, y, z in m) and centre to a parent and return it.
+function addBox(parent, size, centre, color) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size),
+    new THREE.MeshStandardMaterial({ color }));
+  mesh.position.set(...centre);
+  parent.add(mesh);
+  return mesh;
+}
+
+// Add a cylinder along y (the view axis of the head) from y0 to y1 to a parent.
+function addBarrel(parent, radius, y0, y1, color) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, y1 - y0, 24),
+    new THREE.MeshStandardMaterial({ color }));
+  mesh.position.y = (y0 + y1) / 2;
+  parent.add(mesh);
+}
+
+// Build the rail: two bars along x with a block at each end, below the tilt axis.
+function buildRail(robot) {
+  const [x0, y, z] = robot.rail_start_m, length = robot.rail_length_m + CARRIAGE_SIZE_M[0];
+  const railZ = z - YOKE_HEIGHT_M - CARRIAGE_SIZE_M[2] - RAIL_THICKNESS_M / 2;
+  for (const side of [-1, 1]) {
+    addBox(robotGroup, [length, RAIL_THICKNESS_M, RAIL_THICKNESS_M],
+           [x0 + robot.rail_length_m / 2, y + side * RAIL_GAUGE_M / 2, railZ], RAIL_COLOR);
+    addBox(robotGroup, [RAIL_THICKNESS_M, RAIL_GAUGE_M + 2 * RAIL_THICKNESS_M, 2 * RAIL_THICKNESS_M],
+           [x0 + robot.rail_length_m / 2 + side * length / 2, y, railZ], RAIL_COLOR);
+  }
+}
+
+// Build the carriage: a plate on the rail and a yoke of two uprights that carry the tilt axis.
+// The carriage origin is on the tilt axis.
+function buildCarriage() {
   carriage = new THREE.Group();
-  carriage.add(new THREE.Mesh(new THREE.BoxGeometry(...CARRIAGE_SIZE_M), material));
-  carriage.children[0].position.z = -CARRIAGE_SIZE_M[2] / 2;
+  addBox(carriage, CARRIAGE_SIZE_M, [0, 0, -YOKE_HEIGHT_M - CARRIAGE_SIZE_M[2] / 2], ROBOT_COLOR);
+  for (const side of [-1, 1]) {
+    addBox(carriage, [YOKE_THICKNESS_M, 2 * YOKE_THICKNESS_M, YOKE_HEIGHT_M + YOKE_THICKNESS_M],
+           [side * (BODY_SIZE_M[0] + YOKE_THICKNESS_M) / 2, 0, -YOKE_HEIGHT_M / 2], ROBOT_COLOR);
+  }
+  robotGroup.add(carriage);
+}
+
+// Build the head that tilts about x: camera body behind the axis, lens with hood pointing
+// along +y into the arena, and a line from the lens reference point to the focus plane.
+function buildHead(robot) {
   tiltHead = new THREE.Group();
-  tiltHead.add(new THREE.Mesh(new THREE.BoxGeometry(...LENS_SIZE_M), material));
+  addBox(tiltHead, BODY_SIZE_M, [0, -BODY_SIZE_M[1] / 2, 0], BODY_COLOR);
+  addBarrel(tiltHead, LENS_RADIUS_M, 0, LENS_LENGTH_M, LENS_COLOR);
+  addBarrel(tiltHead, HOOD_RADIUS_M, LENS_LENGTH_M, LENS_LENGTH_M + HOOD_LENGTH_M, BODY_COLOR);
   sightLine = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]),
     new THREE.LineBasicMaterial({ color: ROBOT_COLOR }));
+  sightLine.position.y = robot.lens_offset_m;
   tiltHead.add(sightLine);
   carriage.add(tiltHead);
-  robotGroup.add(rail, carriage);
+}
+
+// Build the robot from simple shapes: rail, carriage and tilting camera head.
+function buildRobot(robot) {
+  clearGroup(robotGroup);
+  buildRail(robot);
+  buildCarriage();
+  buildHead(robot);
 }
 
 // Move the robot model: carriage along the rail, head about the x axis, sight line to the
@@ -273,7 +326,7 @@ function updateRobot(robot) {
   carriage.position.set(robotInfo.rail_start_m[0] + robot.rail_m, robotInfo.rail_start_m[1],
                         robotInfo.rail_start_m[2]);
   tiltHead.rotation.x = robot.tilt_rad;
-  sightLine.scale.y = robotInfo.lens_offset_m + robot.focus_m;
+  sightLine.scale.y = robot.focus_m;
   $("ro-rail").textContent = `${robot.rail_m.toFixed(3)} m`;
   $("ro-tilt").textContent = `${(robot.tilt_rad * 180 / Math.PI).toFixed(1)}°`;
   $("ro-focus").textContent = `${robot.focus_m.toFixed(3)} m`;
