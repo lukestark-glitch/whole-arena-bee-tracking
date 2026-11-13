@@ -7,7 +7,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | --- | --- | --- |
 | 0 | Foundation | done |
 | 1 | Simulator core | done |
-| 2 | Simulator window | not started |
+| 2 | Simulator window | in progress |
 | 3 | Tracking core | not started |
 | 4 | Control window | not started |
 | 5 | Robot | not started |
@@ -105,6 +105,8 @@ Create a file only in the stage that needs it.
   wall time), control messages back.
 - Controls: number of bees, maximum speed, pixel noise, dropout probability, pause, time
   scale, seed with restart.
+- `simulator/cameras.py`: bees whose blobs overlap in a camera image are merged into one
+  detection, as `docs/camera-node.md` describes.
 
 **Done when**
 
@@ -112,6 +114,7 @@ Create a file only in the stage that needs it.
   without a restart (except seed).
 - The page holds no simulation logic. With the page closed, the simulator output is
   identical for the same seed and settings.
+- Test: two bees that overlap in a camera image give one detection, two bees apart give two.
 
 ---
 
