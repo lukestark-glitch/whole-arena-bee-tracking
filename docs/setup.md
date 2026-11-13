@@ -159,7 +159,9 @@ side by side.
 - The strip at the bottom shows every camera's image points with the ID each was used for.
 - "Health" shows each node and turns red when a node has been silent for half a second.
 - Selecting a bee sends it to the robot: in the simulator window the robot swings to it and
-  follows it. "Cinema view" shows the robot's picture while a simulator window is open.
+  follows it. The panel below the 3D view shows the robot's cinema picture on the left
+  (while a simulator window is open) and the 16 camera panels on the right.
+- The purple robot is drawn from the robot's own `robot_pose` messages. "Show robot" hides it.
 
 If the simulator is restarted (seed and "Restart"), the tracker notices and starts with
 fresh tracks.

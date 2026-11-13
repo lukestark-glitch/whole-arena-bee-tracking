@@ -16,7 +16,7 @@ from websockets.asyncio.client import ClientConnection, connect
 
 import tracker.main as main
 from shared.config import Config, frame_rate_hz, last_frame_of, load_config, load_robot
-from shared.protocol import Detections, decode, encode_detections
+from shared.protocol import Detections, RobotPose, decode, encode_detections
 from simulator.main import create_simulation, step_simulation
 from tracker.main import (
     Tracker,
@@ -68,7 +68,12 @@ def _feed(frames: int, silent_cameras: frozenset[str] = frozenset()) -> tuple[Tr
 
 def test_scene_message() -> None:
     """The scene lists the cameras with image size and the nodes with their cameras."""
-    message = json.loads(scene_message(CONFIG))
+    message = json.loads(scene_message(CONFIG, ROBOT))
+    assert message["robot"] == {
+        "rail_start_m": list(ROBOT.rail_start_m),
+        "rail_length_m": ROBOT.rail.upper,
+        "lens_offset_m": ROBOT.lens_offset_m,
+    }
     assert message["type"] == "scene" and message["arena_size_m"] == list(CONFIG.arena.size_m)
     assert message["prediction_lead_s"] == CONFIG.tracker.prediction_lead_s
     assert len(message["cameras"]) == 16 and len(message["nodes"]) == 8
@@ -95,6 +100,10 @@ def test_tracks_message() -> None:
     assert message["health"]["silent_nodes"] == []
     assert len(message["health"]["camera_age_s"]) == 16
     assert message["selected"] is None
+    assert message["robot"] is None
+    tracker.robot_pose = RobotPose(t=1.0, rail_m=0.3, tilt_rad=0.1, focus_m=0.25)
+    message = json.loads(tracks_message(tracker, frame, CONFIG, last_report_s))
+    assert message["robot"] == {"rail_m": 0.3, "tilt_rad": 0.1, "focus_m": 0.25}
 
 
 def test_silent_node_is_reported() -> None:
@@ -294,4 +303,4 @@ def test_camera_age_is_never_negative() -> None:
 
 def test_scene_carries_the_camera_minimum() -> None:
     """The page gets the warning threshold from the tracker settings, not a copy."""
-    assert json.loads(scene_message(CONFIG))["min_cameras"] == CONFIG.tracker.min_cameras
+    assert json.loads(scene_message(CONFIG, ROBOT))["min_cameras"] == CONFIG.tracker.min_cameras
