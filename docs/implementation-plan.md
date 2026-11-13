@@ -224,6 +224,11 @@ measured against the truth.
   followed bee.
 - A 60 s run prints time in frame and time in focus. Record the numbers in `CHANGELOG.md`.
 
+**Stage 5 follow-ups**
+
+- The robot in the control window still uses the old simple model (boxes). Reuse the robot
+  model of the simulator window there (rail bars, carriage with yoke, camera body, lens).
+
 ---
 
 ## Stage 6: Calibration
