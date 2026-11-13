@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" width="720" height="300" role="img" aria-label="Top view with three cameras and two bees. Lines from the two lower cameras cross at the two real bees and at two false points. The third camera has no line through the false points, so they are rejected.">
+<style>
+text{font-family:"Helvetica Neue",Arial,sans-serif}
+.ln{stroke:#18222b;stroke-width:1.4;fill:none}.ln-m{stroke:#5d6b76;stroke-width:1.2;fill:none}
+.ln-cam{stroke:#0f6f78;stroke-width:1.3;fill:none}.ln-bee{stroke:#b97700;stroke-width:2;fill:none}
+.dash{stroke-dasharray:5 4}
+.box{fill:#ffffff;stroke:#18222b;stroke-width:1.4}.box-p{fill:#f4f6f7;stroke:#18222b;stroke-width:1.4}
+.box-m{fill:#f4f6f7;stroke:#5d6b76;stroke-width:1.2}
+.f-ink{fill:#18222b}.f-m{fill:#5d6b76}.f-cam{fill:#0f6f78}.f-bee{fill:#b97700}.f-none{fill:none}
+.t{fill:#18222b;font-size:12.5px}.tb{fill:#18222b;font-size:13px;font-weight:600}
+.tm{fill:#5d6b76;font-size:12px}.tc{fill:#0f6f78;font-size:12px;font-weight:500}
+.ty{fill:#b97700;font-size:12.5px;font-weight:600}.mid{text-anchor:middle}.end{text-anchor:end}
+</style>
+<rect width="720" height="300" fill="#ffffff"/>
+
+<rect class="box-p" height="200" width="600" x="60" y="50"></rect>
+<!-- rays from C1 and C2 -->
+<line class="ln-cam" x1="60" x2="560" y1="250" y2="50"></line>
+<line class="ln-cam" x1="60" x2="660" y1="250" y2="130"></line>
+<line class="ln-cam" x1="660" x2="60" y1="250" y2="130"></line>
+<line class="ln-cam" x1="660" x2="160" y1="250" y2="50"></line>
+<!-- C3 rays -->
+<line class="ln-cam" x1="360" x2="260" y1="50" y2="170"></line>
+<line class="ln-cam" x1="360" x2="460" y1="50" y2="170"></line>
+<line class="ln-m dash" x1="360" x2="360" y1="50" y2="210"></line>
+<!-- ghosts -->
+<circle class="box-p dash" cx="360" cy="130" r="8"></circle>
+<circle class="box-p dash" cx="360" cy="190" r="8"></circle>
+<!-- bees -->
+<circle class="f-bee" cx="260" cy="170" r="8"></circle>
+<circle class="f-bee" cx="460" cy="170" r="8"></circle>
+<text class="ty" x="72" y="186">bee A: 3 lines</text>
+<text class="ty end" x="648" y="186">bee B: 3 lines</text>
+<text class="t mid" x="360" y="274">dashed circles are ghost points: only 2 lines cross</text>
+<text class="tm mid" x="360" y="291">camera 3 sees nothing along the dashed line</text>
+<!-- cameras -->
+<rect class="f-cam" height="14" width="14" x="53" y="243"></rect><text class="tc mid" x="60" y="276">camera 1</text>
+<rect class="f-cam" height="14" width="14" x="653" y="243"></rect><text class="tc mid" x="660" y="276">camera 2</text>
+<rect class="f-cam" height="14" width="14" x="353" y="43"></rect><text class="tc mid" x="360" y="34">camera 3</text>
+
+</svg>
