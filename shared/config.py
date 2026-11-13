@@ -6,6 +6,7 @@ the arena frame: right-handed, x along the long side, y away from the robot,
 z up, in metres.
 """
 
+import math
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -392,6 +393,21 @@ def frame_rate_hz(config: Config) -> float:
         Trigger rate in Hz.
     """
     return config.camera_models[config.cameras[0].model].rate_hz
+
+
+def last_frame_of(config: Config, duration_s: float) -> int:
+    """Return the number of the last frame that starts before a duration ends.
+
+    Simulator, tracker and metrics all end a run of a given duration with this frame.
+
+    Args:
+        config: A validated configuration.
+        duration_s: Duration in simulation seconds.
+
+    Returns:
+        The largest frame number n with n / frame rate < duration_s.
+    """
+    return math.ceil(duration_s * frame_rate_hz(config)) - 1
 
 
 def _validate(config: Config) -> None:
