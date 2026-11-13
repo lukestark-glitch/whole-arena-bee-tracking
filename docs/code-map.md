@@ -5,7 +5,7 @@ The full function reference is generated from the docstrings (see `docs/setup.md
 
 Update this file in every stage. A module that is not listed here should not exist.
 
-Status: Stages 0 to 2 are built.
+Status: Stages 0 to 3 are built.
 
 ## How to read this file
 
@@ -19,15 +19,15 @@ Each package gets a section. Each module gets one row.
 
 | Module | Purpose | Public functions and classes | Used by |
 | --- | --- | --- | --- |
-| `shared/config.py` | Load and validate `config/*.yaml` into dataclasses | `load_config`, `frame_rate_hz`, `ConfigError`, `Config`, `Arena`, `CameraModel`, `Camera`, `Node`, `Noise`, `Bees`, `Ports` | simulator, experiments, tracker (from Stage 3) |
-| `shared/protocol.py` | Build and parse the UDP messages of `docs/protocol.md` | `encode_detections`, `encode_target`, `encode_robot_pose`, `encode_truth`, `decode`, `ProtocolError`, `Detections`, `Target`, `OtherBee`, `RobotPose`, `Truth`, `TruthBee`, `RobotAxes`, `UDP_HOST` | simulator, experiments, tracker (from Stage 3) |
-| `shared/geometry.py` | Equidistant fisheye camera model: pose, projection, rays, visibility | `camera_pose`, `focal_length_px`, `project`, `pixel_to_ray`, `is_visible`, `CameraPose` | simulator, tracker (from Stage 3) |
+| `shared/config.py` | Load and validate `config/*.yaml` into dataclasses | `load_config`, `frame_rate_hz`, `last_frame_of`, `ConfigError`, `Config`, `Arena`, `CameraModel`, `Camera`, `Node`, `Noise`, `Bees`, `TrackerSettings`, `Ports` | simulator, tracker, experiments |
+| `shared/protocol.py` | Build and parse the UDP messages of `docs/protocol.md` | `encode_detections`, `encode_target`, `encode_robot_pose`, `encode_truth`, `decode`, `ProtocolError`, `Detections`, `Target`, `OtherBee`, `RobotPose`, `Truth`, `TruthBee`, `RobotAxes`, `UDP_HOST` | simulator, tracker, experiments |
+| `shared/geometry.py` | Equidistant fisheye camera model: pose, projection, rays, visibility | `camera_pose`, `focal_length_px`, `project`, `pixel_to_ray`, `is_visible`, `CameraPose` | simulator, tracker |
 
 ## `config/`
 
 | File | Content |
 | --- | --- |
-| `config/default.yaml` | Arena box, 16 cameras on 8 nodes, camera model `pi_gs_imx296`, noise, bees, UDP ports, seed |
+| `config/default.yaml` | Arena box, 16 cameras on 8 nodes, camera model `pi_gs_imx296`, noise, bees, tracker settings, ports, seed |
 
 ## `tests/`
 
@@ -41,6 +41,11 @@ Each package gets a section. Each module gets one row.
 | `tests/test_nodes.py` | Shared node delay, message content, empty cameras still report |
 | `tests/test_simulator.py` | Identical output for the same seed and controls, every control, 16 detections and 1 truth per frame, UDP end to end |
 | `tests/test_window.py` | `scene` and `state` messages, WebSocket controls, page served over HTTP |
+| `tests/test_receiver.py` | Complete and timed-out frames, release order, late and split messages |
+| `tests/test_triangulate.py` | Noise-free rays give the point, the ghost figure gives two points, guided step, coverage rule |
+| `tests/test_tracks.py` | Filter recovers a constant speed, IDs survive crossing paths, probation, removal, hysteresis |
+| `tests/test_metrics.py` | Every metric on hand-made cases, log reading, truth over UDP |
+| `tests/test_tracker.py` | `tracker/` imports no simulator code and no clock; ten simulated bees tracked end to end |
 
 ## `simulator/`
 
@@ -58,12 +63,20 @@ Not built yet (Stage 5).
 
 ## `tracker/`
 
-Not built yet (Stage 3 and 4).
+| Module | Purpose | Public functions and classes | Used by |
+| --- | --- | --- | --- |
+| `tracker/receiver.py` | Group `detections` by frame; release a frame when all cameras reported or after the timeout | `FrameAssembler`, `Frame`, `receive_frames` | `tracker/main.py` |
+| `tracker/triangulate.py` | Pixels to rays, points for known tracks first, then new points with ghost rejection | `triangulate`, `guided_points`, `new_points`, `frame_rays`, `closest_point_to_rays`, `point_ray_distances`, `tracking_cameras`, `TrackingCamera`, `Rays`, `Points`, `NEW_POINT` | `tracker/main.py` |
+| `tracker/tracks.py` | One Kalman filter per bee, assignment of points to tracks, probation, removal, sitting/flying | `predict_tracks`, `update_tracks`, `assign`, `create_track_set`, `Track`, `TrackSet`, `SITTING`, `FLYING` | `tracker/main.py` |
+| `tracker/main.py` | The loop: one frame in, one line of the track log out; command line | `Tracker`, `create_tracker`, `process_frame`, `run`, `main` | command line |
+
+The control window (`tracker/web/`) is not built yet (Stage 4).
 
 ## `experiments/`
 
 | Module | Purpose | Public functions and classes | Used by |
 | --- | --- | --- | --- |
 | `experiments/listen_detections.py` | Listener that prints one summary line of the `detections` per simulation second | `summarise`, `main` | command line |
+| `experiments/metrics.py` | Compare the track log with `truth`: position error, ID swaps, ghost tracks, tracked share. The only module that reads both | `compute_metrics`, `read_track_log`, `format_metrics`, `Metrics`, `main` | command line |
 
-Metrics and batch runs are not built yet (Stage 3, 5 and 7).
+Batch runs are not built yet (Stage 7).

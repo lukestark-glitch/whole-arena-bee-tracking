@@ -3,7 +3,8 @@
 How the parts fit together and how they talk to each other. Update this file whenever a
 component or a channel changes. Message fields are defined in `docs/protocol.md`.
 
-Status: `shared/` and the simulator with its window are built (Stages 0 to 2).
+Status: `shared/`, the simulator with its window, the tracker without its window and the
+metrics are built (Stages 0 to 3).
 Everything else is design. Each section notes the stage that builds it.
 
 ## Overview
@@ -86,6 +87,30 @@ The software under test. Knows nothing about the simulator.
   probation time, track removal after a time without support.
 - Output: `target` for the selected track, a log of all tracks for the metrics.
 - Serves the control window and accepts the selection from it.
+
+What the tracker does with one frame (Stage 3):
+
+1. Predict every track to the frame's exposure time.
+2. Known bees first: per camera, each track claims the ray nearest to its prediction
+   (within `claim_gate_m`). The claimed rays give a least-squares point. A point counts
+   only if the usual share of the cameras covering that place agrees.
+3. New points from the rays that are left: pairs of rays that nearly meet, supported by
+   further cameras. Points with the most cameras are accepted first, and a ray supports
+   only one point. At least three cameras, more where more cameras cover the place.
+4. Tracks without a point from step 2 take the nearest new point (within
+   `assignment_gate_m`). Points that are left start a track on probation.
+5. One line is written to the track log.
+
+Track log (`logs/tracks.jsonl`, one JSON object per line and frame):
+
+```json
+{"frame": 1042, "t": 17.366667,
+ "tracks": [{"id": 4, "pos": [0.412, 0.1503, 0.1711], "vel": [0.8, -0.12, 0.05],
+             "acc": [0.0, 0.0, 0.0], "state": "flying", "confirmed": true, "cameras": 7}]}
+```
+
+`confirmed` is false while a track is on probation. `cameras` is the number of cameras
+behind the track's point in this frame, 0 when the track ran on prediction alone.
 
 ### `experiments/` (Stages 3, 5 and 7)
 
