@@ -3,6 +3,15 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-13: Stage 2, simulator window
+
+- Simulator window at <http://127.0.0.1:8765/>: arena, bees coloured by state, cameras with
+  view cones.
+- Controls that change the running simulation: number of bees, maximum speed, pixel noise,
+  dropout, pause, time scale, seed with restart.
+- Bees whose blobs overlap in a camera image are merged into one detection (D27).
+- Config: new port `simulator_window` (decisions D27 to D31).
+
 ## 2026-11-13: Stage 1, simulator core
 
 - `shared/geometry.py`: camera pose, equidistant fisheye projection, pixel to ray,
