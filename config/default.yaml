@@ -120,7 +120,7 @@ bees:
   flight_direction_time_s: 0.5
   walk_speed_m_s: 0.03
   walk_turn_rad_per_sqrt_s: 1.0
-  landing_probability: 0.2          # per wall contact
+  landing_probability: 0.05         # per wall contact
   takeoff_rate_hz: 0.2
   sit_to_walk_rate_hz: 0.3
   walk_to_sit_rate_hz: 0.3
