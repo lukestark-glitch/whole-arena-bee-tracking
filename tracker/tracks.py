@@ -13,10 +13,10 @@ from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
 
 from shared.config import TrackerSettings
+from tracker.triangulate import NEW_POINT
 
 SITTING = "sitting"
 FLYING = "flying"
-NEW_POINT = -1  # value in track_ids for a point that belongs to no track yet
 
 _AXES = 3  # x, y, z
 _STATE_DIM = 3 * _AXES  # position, velocity, acceleration per axis
@@ -326,22 +326,3 @@ def update_tracks(
     track_set.tracks = [t for t in track_set.tracks if not _is_expired(t, settings)]
     for track in track_set.tracks:
         _update_motion(track, settings)
-
-
-def extrapolate(track: Track, t_s: float) -> np.ndarray:
-    """Predict a track's position at a time without changing the track.
-
-    Uses constant acceleration: p + v dt + a dt^2 / 2.
-
-    Args:
-        track: Track to extrapolate.
-        t_s: Target simulation time in s.
-
-    Returns:
-        Shape (3,) position in m, arena frame.
-    """
-    dt_s = t_s - track.t_s
-    p = track.state[_POSITION]
-    v = track.state[_VELOCITY]
-    a = track.state[2 * _AXES :]
-    return p + v * dt_s + a * dt_s**2 / 2.0

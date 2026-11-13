@@ -3,6 +3,32 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-13: Stage 3, tracking core
+
+- `tracker/`: receiver, triangulation (known tracks first, then new points with ghost
+  rejection), one constant-acceleration Kalman filter per bee, track log.
+- `experiments/metrics.py`: position error, ID swaps, ghost tracks, tracked share.
+- Config: new `tracker` section (decisions D32 to D38).
+- Fixed: a time scale above 1 ran too slowly because of sub-millisecond waits.
+
+**Baseline** (60 s, 10 bees, default noise, seed 1, default configuration):
+
+| Metric | Value |
+| --- | --- |
+| Frames evaluated | 3600 |
+| Mean position error | 0.44 mm |
+| 95th percentile position error | 1.11 mm |
+| ID swaps | 23 |
+| Ghost tracks | 0 |
+| Confirmed tracks (10 bees) | 14 |
+| Mean share of time tracked | 99.6 % |
+| Lowest share of time tracked | 97.2 % (bee 8) |
+
+Reading: the position error is below the 1 mm estimate of the concept paper. The weak
+point is identity. Tracks break when a bee turns sharply at a wall, and two bees closer
+than about one body length merge into one detection in most cameras and are tracked as
+one until they separate.
+
 ## 2026-11-13: Stage 2, simulator window
 
 - Simulator window at <http://127.0.0.1:8765/>: arena, bees coloured by state, cameras with

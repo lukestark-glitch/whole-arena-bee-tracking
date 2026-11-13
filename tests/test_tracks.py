@@ -10,7 +10,6 @@ from tracker.tracks import (
     Track,
     assign,
     create_track_set,
-    extrapolate,
     predict_tracks,
     update_tracks,
 )
@@ -191,15 +190,6 @@ def test_motion_hysteresis():
     assert _motion_after(track_set, 0.1) == FLYING
     assert _motion_after(track_set, 0.01) == SITTING
     assert _motion_after(track_set, 0.1) == SITTING
-
-
-def test_extrapolate_matches_formula_and_leaves_track_unchanged():
-    """Extrapolation equals p + v dt + a dt^2/2 and does not modify the track."""
-    state = np.array([1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 1.0, -1.0, 2.0])
-    track = Track(0, state.copy(), np.eye(9), 1.0, True, 5, 0, SITTING, 3)
-    result = extrapolate(track, 1.5)
-    assert np.allclose(result, state[:3] + state[3:6] * 0.5 + state[6:] * 0.125)
-    assert np.array_equal(track.state, state) and track.t_s == 1.0
 
 
 def test_covariance_stays_symmetric_positive_definite():
