@@ -7,7 +7,7 @@ Rules for Claude Code in this repository. Read this file fully before any work.
 A proof of concept for whole-arena 3D tracking of bumblebees. Fixed cameras around a flight
 arena see every bee, a tracking server triangulates them and keeps one ID per bee, and a
 camera robot is told where the selected bee is. No hardware exists. A simulator stands in for
-bees, cameras, camera nodes and the robot. Background: `docs/concept-paper.pdf`.
+bees, cameras, camera nodes and the robot. Background: `docs/concept-paper.md`.
 
 Two programs talk over UDP with the messages a real system would use:
 

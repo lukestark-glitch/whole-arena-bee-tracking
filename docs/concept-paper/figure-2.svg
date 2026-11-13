@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 380" width="760" height="380" role="img" aria-label="Data flow: a trigger source synchronises camera nodes, which send 2D points to a tracking server. The server sends the selected bee's position, velocity and distance to the robot and exchanges tracks and selection with the control software.">
+<style>
+text{font-family:"Helvetica Neue",Arial,sans-serif}
+.ln{stroke:#18222b;stroke-width:1.4;fill:none}.ln-m{stroke:#5d6b76;stroke-width:1.2;fill:none}
+.ln-cam{stroke:#0f6f78;stroke-width:1.3;fill:none}.ln-bee{stroke:#b97700;stroke-width:2;fill:none}
+.dash{stroke-dasharray:5 4}
+.box{fill:#ffffff;stroke:#18222b;stroke-width:1.4}.box-p{fill:#f4f6f7;stroke:#18222b;stroke-width:1.4}
+.box-m{fill:#f4f6f7;stroke:#5d6b76;stroke-width:1.2}
+.f-ink{fill:#18222b}.f-m{fill:#5d6b76}.f-cam{fill:#0f6f78}.f-bee{fill:#b97700}.f-none{fill:none}
+.t{fill:#18222b;font-size:12.5px}.tb{fill:#18222b;font-size:13px;font-weight:600}
+.tm{fill:#5d6b76;font-size:12px}.tc{fill:#0f6f78;font-size:12px;font-weight:500}
+.ty{fill:#b97700;font-size:12.5px;font-weight:600}.mid{text-anchor:middle}.end{text-anchor:end}
+</style>
+<rect width="760" height="380" fill="#ffffff"/>
+
+<defs>
+<marker id="a3" markerHeight="8" markerWidth="9" orient="auto" refX="8" refY="4"><path class="f-ink" d="M0,0 L9,4 L0,8 z"></path></marker>
+<marker id="a3m" markerHeight="8" markerWidth="9" orient="auto" refX="8" refY="4"><path class="f-m" d="M0,0 L9,4 L0,8 z"></path></marker>
+</defs>
+<!-- trigger -->
+<rect class="box-m" height="50" width="200" x="20" y="20"></rect>
+<text class="tb mid" x="120" y="42">Trigger source</text>
+<text class="tm mid" x="120" y="59">one pulse per frame, 60 Hz</text>
+<line class="ln-m" marker-end="url(#a3m)" x1="120" x2="120" y1="70" y2="128"></line>
+<text class="tm" x="130" y="104">sync pulse</text>
+<path class="ln-m dash" d="M220,45 H655 V128" marker-end="url(#a3m)"></path>
+<text class="tm mid" x="440" y="37">shared trigger for the robot's stereo camera (optional)</text>
+<!-- cameras -->
+<rect class="box" height="100" width="200" x="20" y="130"></rect>
+<rect class="f-cam" height="100" width="6" x="20" y="130"></rect>
+<text class="tb mid" x="124" y="154">Camera nodes (N)</text>
+<text class="t mid" x="124" y="174">one small computer per</text>
+<text class="t mid" x="124" y="190">two infrared cameras</text>
+<text class="tm mid" x="124" y="212">find bees in their own images</text>
+<!-- server -->
+<rect class="box" height="100" width="200" x="290" y="130"></rect>
+<text class="tb mid" x="390" y="154">Tracking server</text>
+<text class="t mid" x="390" y="174">triangulate 3D points</text>
+<text class="t mid" x="390" y="190">assign and keep IDs</text>
+<text class="t mid" x="390" y="206">filter and predict motion</text>
+<!-- robot -->
+<rect class="box" height="100" width="180" x="560" y="130"></rect>
+<rect class="f-bee" height="100" width="6" x="734" y="130"></rect>
+<text class="tb mid" x="647" y="154">Camera robot (existing)</text>
+<text class="t mid" x="647" y="174">rail, tilt, focus motor</text>
+<text class="t mid" x="647" y="190">stereo camera refines</text>
+<text class="tm mid" x="647" y="212">centring and focus</text>
+<!-- ui -->
+<rect class="box" height="64" width="200" x="290" y="300"></rect>
+<text class="tb mid" x="390" y="324">Control software</text>
+<text class="t mid" x="390" y="342">3D view, click to select,</text>
+<text class="t mid" x="390" y="357">live speed, camera feeds</text>
+<!-- arrows -->
+<line class="ln" marker-end="url(#a3)" x1="220" x2="288" y1="170" y2="170"></line>
+<text class="t mid" x="215" y="252">2D pixel points</text>
+<text class="tm mid" x="215" y="268">+ frame time, over Ethernet</text>
+<line class="ln-m dash" x1="255" x2="255" y1="240" y2="176"></line>
+<line class="ln" marker-end="url(#a3)" x1="490" x2="558" y1="160" y2="160"></line>
+<line class="ln" marker-end="url(#a3)" x1="560" x2="492" y1="200" y2="200"></line>
+<text class="t" x="535" y="252">out: target position,</text>
+<text class="t" x="535" y="268">velocity, distance</text>
+<text class="tm" x="535" y="284">back: rail and tilt position</text>
+<line class="ln-m dash" x1="525" x2="525" y1="240" y2="206"></line>
+<line class="ln" marker-end="url(#a3)" x1="370" x2="370" y1="230" y2="298"></line>
+<line class="ln" marker-end="url(#a3)" x1="410" x2="410" y1="300" y2="232"></line>
+<text class="tm end" x="362" y="270">tracks</text>
+<text class="tm" x="418" y="270">selected ID</text>
+
+</svg>

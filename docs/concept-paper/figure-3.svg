@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 380" width="720" height="380" role="img" aria-label="Oblique view of the long flight chamber with cameras in all eight corners and additional cameras along the long edges. Lines of sight from all sixteen cameras meet at the selected bee. The camera robot runs on a rail in front.">
+<style>
+text{font-family:"Helvetica Neue",Arial,sans-serif}
+.ln{stroke:#18222b;stroke-width:1.4;fill:none}.ln-m{stroke:#5d6b76;stroke-width:1.2;fill:none}
+.ln-cam{stroke:#0f6f78;stroke-width:1.3;fill:none}.ln-bee{stroke:#b97700;stroke-width:2;fill:none}
+.dash{stroke-dasharray:5 4}
+.box{fill:#ffffff;stroke:#18222b;stroke-width:1.4}.box-p{fill:#f4f6f7;stroke:#18222b;stroke-width:1.4}
+.box-m{fill:#f4f6f7;stroke:#5d6b76;stroke-width:1.2}
+.f-ink{fill:#18222b}.f-m{fill:#5d6b76}.f-cam{fill:#0f6f78}.f-bee{fill:#b97700}.f-none{fill:none}
+.t{fill:#18222b;font-size:12.5px}.tb{fill:#18222b;font-size:13px;font-weight:600}
+.tm{fill:#5d6b76;font-size:12px}.tc{fill:#0f6f78;font-size:12px;font-weight:500}
+.ty{fill:#b97700;font-size:12.5px;font-weight:600}.mid{text-anchor:middle}.end{text-anchor:end}
+</style>
+<rect width="720" height="380" fill="#ffffff"/>
+
+<!-- back face -->
+<rect class="ln-m" height="140" width="480" x="150" y="60"></rect>
+<!-- connectors -->
+<line class="ln-m" x1="80" x2="150" y1="110" y2="60"></line>
+<line class="ln" x1="560" x2="630" y1="110" y2="60"></line>
+<line class="ln-m" x1="80" x2="150" y1="250" y2="200"></line>
+<line class="ln" x1="560" x2="630" y1="250" y2="200"></line>
+<line class="ln" x1="150" x2="630" y1="60" y2="60"></line>
+<line class="ln" x1="630" x2="630" y1="60" y2="200"></line>
+<!-- rays -->
+<g class="ln-cam" opacity=".8" stroke-width="1">
+<line x1="80" x2="360" y1="110" y2="160"></line>
+<line x1="560" x2="360" y1="110" y2="160"></line>
+<line x1="80" x2="360" y1="250" y2="160"></line>
+<line x1="560" x2="360" y1="250" y2="160"></line>
+<line x1="150" x2="360" y1="60" y2="160"></line>
+<line x1="630" x2="360" y1="60" y2="160"></line>
+<line x1="150" x2="360" y1="200" y2="160"></line>
+<line x1="630" x2="360" y1="200" y2="160"></line>
+<line x1="240" x2="360" y1="110" y2="160"></line>
+<line x1="400" x2="360" y1="110" y2="160"></line>
+<line x1="240" x2="360" y1="250" y2="160"></line>
+<line x1="400" x2="360" y1="250" y2="160"></line>
+<line x1="310" x2="360" y1="60" y2="160"></line>
+<line x1="470" x2="360" y1="60" y2="160"></line>
+<line x1="310" x2="360" y1="200" y2="160"></line>
+<line x1="470" x2="360" y1="200" y2="160"></line>
+</g>
+<!-- front face -->
+<rect class="ln" height="140" width="480" x="80" y="110"></rect>
+<!-- corner cameras -->
+<rect class="f-cam" height="12" width="12" x="74" y="104"></rect><rect class="f-cam" height="12" width="12" x="554" y="104"></rect>
+<rect class="f-cam" height="12" width="12" x="74" y="244"></rect><rect class="f-cam" height="12" width="12" x="554" y="244"></rect>
+<rect class="f-cam" height="12" width="12" x="144" y="54"></rect><rect class="f-cam" height="12" width="12" x="624" y="54"></rect>
+<rect class="f-cam" height="12" width="12" x="144" y="194"></rect><rect class="f-cam" height="12" width="12" x="624" y="194"></rect>
+<!-- edge cameras -->
+<circle class="f-cam" cx="240" cy="110" r="5.5"></circle><circle class="f-cam" cx="400" cy="110" r="5.5"></circle>
+<circle class="f-cam" cx="240" cy="250" r="5.5"></circle><circle class="f-cam" cx="400" cy="250" r="5.5"></circle>
+<circle class="f-cam" cx="310" cy="60" r="5.5"></circle><circle class="f-cam" cx="470" cy="60" r="5.5"></circle>
+<circle class="f-cam" cx="310" cy="200" r="5.5"></circle><circle class="f-cam" cx="470" cy="200" r="5.5"></circle>
+<!-- bees -->
+<circle class="f-ink" cx="200" cy="190" r="4"></circle><circle class="f-ink" cx="500" cy="150" r="4"></circle>
+<circle class="f-bee" cx="360" cy="160" r="7"></circle><circle class="ln-bee" cx="360" cy="160" r="13"></circle>
+<!-- robot -->
+<line class="ln" x1="60" x2="560" y1="318" y2="318"></line>
+<rect class="box" height="22" width="44" x="300" y="296"></rect>
+<line class="ln-bee dash" x1="330" x2="356" y1="296" y2="175"></line>
+<text class="tm" x="570" y="322">rail</text>
+<text class="tm end" x="290" y="312">camera robot</text>
+<!-- labels -->
+<text class="tm mid" x="390" y="40">arena about 90 × 30 × 30 cm</text>
+<rect class="f-cam" height="10" width="10" x="80" y="338"></rect><text class="tm" x="96" y="347">corner camera</text>
+<circle class="f-cam" cx="215" cy="343" r="5"></circle><text class="tm" x="226" y="347">added camera along a long edge</text>
+<line class="ln-cam" x1="440" x2="466" y1="343" y2="343"></line><text class="tm" x="472" y="347">line of sight to the bee</text>
+<circle class="f-bee" cx="85" cy="365" r="4"></circle><circle class="ln-bee" cx="85" cy="365" r="8"></circle><text class="tm" x="100" y="369">selected bee</text>
+<circle class="f-ink" cx="215" cy="365" r="4"></circle><text class="tm" x="226" y="369">other bees</text>
+
+</svg>
