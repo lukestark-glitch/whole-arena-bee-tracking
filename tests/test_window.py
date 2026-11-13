@@ -21,7 +21,7 @@ from simulator.main import create_simulation, scene_message, state_message
 
 CONFIG = load_config(Path(__file__).parent.parent / "config" / "default.yaml")
 RUN_DURATION_S = 5.0  # simulation time of the background run; ended early by the tests
-FINISH_TIME_SCALE = 1000.0  # makes the rest of the run take a few milliseconds
+FINISH_TIME_SCALE = 100.0  # makes the rest of the run take a few milliseconds
 TIMEOUT_S = 5.0
 CONNECT_ATTEMPTS = 100
 CONNECT_PAUSE_S = 0.05
