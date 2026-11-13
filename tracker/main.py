@@ -365,15 +365,16 @@ def apply_robot_pose(tracker: Tracker, datagram: bytes) -> None:
         tracker.robot_pose = message
 
 
-def scene_message(config: Config) -> str:
+def scene_message(config: Config, robot: Robot) -> str:
     """Build the `scene` message the control window gets on connect.
 
     Args:
         config: Configuration; positions in metres, arena frame.
+        robot: Robot description; its rail is drawn in the window.
 
     Returns:
-        The JSON text with arena size, prediction lead, cameras, nodes and the port on
-        which the simulator streams the cinema view.
+        The JSON text with arena size, prediction lead, cameras, nodes, robot geometry and
+        the port on which the simulator streams the cinema view.
     """
     cameras = [
         {
@@ -394,6 +395,11 @@ def scene_message(config: Config) -> str:
             "prediction_lead_s": config.tracker.prediction_lead_s,
             "min_cameras": config.tracker.min_cameras,
             "cinema_port": config.ports.simulator_window,
+            "robot": {
+                "rail_start_m": list(robot.rail_start_m),
+                "rail_length_m": robot.rail.upper,
+                "lens_offset_m": robot.lens_offset_m,
+            },
             "cameras": cameras,
             "nodes": nodes,
         },
@@ -460,8 +466,13 @@ def tracks_message(
         last_report_s: Camera id to the time of its newest message, simulation s.
 
     Returns:
-        The JSON text with all tracks, the labelled detections, the selection and health.
+        The JSON text with all tracks, the labelled detections, the selection, health and
+        the robot axes of the newest `robot_pose` (null before the first).
     """
+    pose = tracker.robot_pose
+    robot = None
+    if pose is not None:
+        robot = {"rail_m": pose.rail_m, "tilt_rad": pose.tilt_rad, "focus_m": pose.focus_m}
     lead_s = config.tracker.prediction_lead_s
     detections = {
         camera_id: [
@@ -481,6 +492,7 @@ def tracks_message(
             ],
             "detections": detections,
             "health": _health(config, frame.t_s, last_report_s),
+            "robot": robot,
         },
         separators=(",", ":"),
     )
@@ -663,7 +675,7 @@ async def _control_window(session: _Session, connection: ServerConnection) -> No
         connection: The WebSocket connection of the window.
     """
     try:
-        await connection.send(scene_message(session.config))
+        await connection.send(scene_message(session.config, session.tracker.robot))
         session.connections.add(connection)
         _resend_snapshot(session)
         async for raw in connection:

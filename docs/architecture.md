@@ -240,6 +240,7 @@ Tracker → page, once after the connection opens:
 ```json
 {"type": "scene", "arena_size_m": [0.9, 0.3, 0.3], "prediction_lead_s": 0.1, "min_cameras": 3,
  "cinema_port": 8765,
+ "robot": {"rail_start_m": [0.0, -0.15, 0.15], "rail_length_m": 0.9, "lens_offset_m": 0.0},
  "cameras": [{"id": "cam-01", "position_m": [0, 0, 0], "look_at_m": [0.45, 0.15, 0.15],
               "fov_horizontal_rad": 1.919862, "width_px": 1456, "height_px": 1088}],
  "nodes": [{"id": "node-01", "cameras": ["cam-01", "cam-02"]}]}
@@ -253,7 +254,8 @@ Tracker → page, at most 30 times per second of simulation time:
              "acc": [1.2, 0.0, -0.4], "pred": [0.492, 0.1383, 0.1761],
              "state": "flying", "confirmed": true, "cameras": 7}],
  "detections": {"cam-01": [[512.31, 300.87, 14.2, 4], [901.05, 644.4, 9.8, -1]]},
- "health": {"silent_nodes": ["node-03"], "camera_age_s": {"cam-01": 0.0}}}
+ "health": {"silent_nodes": ["node-03"], "camera_age_s": {"cam-01": 0.0}},
+ "robot": {"rail_m": 0.392, "tilt_rad": 0.11, "focus_m": 0.215}}
 ```
 
 | Field | Meaning |
@@ -265,6 +267,7 @@ Tracker → page, at most 30 times per second of simulation time:
 | `detections` | Per camera: `[u, v, size, track_id]`; `track_id` is -1 for a detection no track used |
 | `health.silent_nodes` | Nodes whose cameras have all been silent for `node_silent_after_s` |
 | `health.camera_age_s` | Simulation time since each camera last reported |
+| `robot` | Axes of the newest `robot_pose`, or `null` before the first. The window draws the robot from these and from the robot file, never from the truth |
 
 Page → tracker:
 

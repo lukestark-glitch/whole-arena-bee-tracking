@@ -80,7 +80,7 @@ Each package gets a section. Each module gets one row.
 | `tracker/triangulate.py` | Pixels to rays, points for known tracks first, then new points with ghost rejection | `triangulate`, `guided_points`, `new_points`, `frame_rays`, `closest_point_to_rays`, `point_ray_distances`, `tracking_cameras`, `TrackingCamera`, `Rays`, `Points`, `NEW_POINT` | `tracker/main.py` |
 | `tracker/tracks.py` | One Kalman filter per bee, assignment of points to tracks, probation, removal, sitting/flying | `predict_tracks`, `update_tracks`, `assign`, `extrapolate`, `create_track_set`, `Track`, `TrackSet`, `SITTING`, `FLYING` | `tracker/main.py` |
 | `tracker/main.py` | The loop: one frame in, one line of the track log and one `target` out; `robot_pose` in; snapshots for the control window, selection, node health; command line | `Tracker`, `create_tracker`, `process_frame`, `target_message`, `apply_robot_pose`, `scene_message`, `tracks_message`, `apply_selection`, `run`, `main` | command line |
-| `tracker/web/index.html` | Control window: tracks with ID, trail and prediction, selection by click, camera panels, health, cinema view. No logic that affects results | (browser page) | served by `tracker/main.py` |
+| `tracker/web/index.html` | Control window: tracks with ID, trail and prediction, selection by click, camera panels, health, cinema view, the robot as its `robot_pose` reports it. No logic that affects results | (browser page) | served by `tracker/main.py` |
 
 ## `experiments/`
 
