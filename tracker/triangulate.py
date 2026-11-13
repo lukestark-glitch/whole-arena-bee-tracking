@@ -502,6 +502,9 @@ def _thin_seeds(seeds: np.ndarray, settings: TrackerSettings) -> np.ndarray:
     """
     if len(seeds) < settings.min_cameras * (settings.min_cameras - 1) // 2:
         return seeds[:0]
+    # A radius of one tolerance fits points seen by four or more cameras. With exactly
+    # three cameras and one narrow pair, a real point can be thinned away; the default
+    # layout covers every place with at least eight cameras.
     radius_m = _CLUSTER_RADIUS_TOLERANCES * settings.ray_tolerance_m
     needed = settings.min_cameras * (settings.min_cameras - 1) // 2
     nearest_m, _ = cKDTree(seeds).query(seeds, k=needed, workers=-1)

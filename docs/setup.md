@@ -3,7 +3,8 @@
 How to install and run what exists. Keep this file correct: every stage adds its commands
 here.
 
-Status: Stages 0 to 2 are built (configuration, messages, simulator with its window). The sections marked "after Stage n"
+Status: Stages 0 to 3 are built (configuration, messages, simulator with its window,
+tracker without its window, metrics). The sections marked "after Stage n"
 are filled in by that stage.
 
 ## Requirements
@@ -34,12 +35,13 @@ pytest
 ```
 
 All tests must pass. They cover config loading and validation, every message type, the camera model, the bee
-model and the simulator output.
+model, the simulator output, triangulation, the filter and the metrics. The whole suite
+takes about one minute.
 
 ## Build the function reference
 
 ```bash
-pdoc shared simulator experiments -o site/api
+pdoc shared simulator tracker experiments -o site/api
 ```
 
 Each stage that creates a package adds it to this command.
@@ -72,9 +74,34 @@ python -m experiments.listen_detections
 It prints one line per second of simulation time. Expected with the default config:
 16 cameras, 60 frames per camera.
 
-## Run the tracker (after Stage 3)
+## Run the tracker
 
-To be written by Stage 3.
+```bash
+python -m tracker.main
+```
+
+It listens for `detections` (UDP 5005) and writes one line per frame to `logs/tracks.jsonl`.
+Start it before the simulator.
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--config PATH` | Configuration file | `config/default.yaml` |
+| `--log PATH` | Track log file | `logs/tracks.jsonl` |
+| `--duration S` | Stop after `S` seconds of simulation time | run until Ctrl+C |
+
+## Measure a run (baseline)
+
+Three terminals, in this order. All three stop by themselves after 60 s of simulation time.
+
+```bash
+python -m experiments.metrics --tracks logs/tracks.jsonl --duration 60   # terminal 1
+python -m tracker.main --duration 60                                     # terminal 2
+python -m simulator.main --duration 60                                   # terminal 3
+```
+
+Terminal 1 prints the result: position error, ID swaps, ghost tracks and the share of
+time each bee was tracked. The numbers of the default configuration are recorded in
+`CHANGELOG.md`. The same seed gives the same numbers.
 
 ## Open the windows
 
@@ -95,3 +122,5 @@ To be written by Stage 7.
 
 - `OSError: [Errno 48] Address already in use`: another simulator or listener is still
   running. Stop it, or change the port under `ports` in the config.
+- The metrics show far fewer frames than expected: the tracker was started after the
+  simulator. Start metrics and tracker first.

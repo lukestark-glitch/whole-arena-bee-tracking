@@ -8,7 +8,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 0 | Foundation | done |
 | 1 | Simulator core | done |
 | 2 | Simulator window | done |
-| 3 | Tracking core | in progress |
+| 3 | Tracking core | done |
 | 4 | Control window | not started |
 | 5 | Robot | not started |
 | 6 | Calibration | not started |

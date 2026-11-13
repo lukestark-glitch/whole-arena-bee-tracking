@@ -17,6 +17,9 @@ from shared.protocol import Detections, ProtocolError, decode
 
 # Large enough for the biggest datagram a UDP socket can deliver (IPv4 limit).
 RECV_BUFFER_BYTES = 65535
+# Senders round `t` to microseconds, so the difference of two times can come out this
+# much too small; without the slack a timeout of two frame periods would often take three.
+TIME_ROUNDING_S = 1e-6
 
 
 @dataclass(frozen=True)
@@ -88,7 +91,7 @@ class FrameAssembler:
         newest_ready = -1
         for number, pending in self._pending.items():
             complete = self._camera_ids <= pending.detections.keys()
-            timed_out = now_s - pending.t_s >= self._timeout_s
+            timed_out = now_s - pending.t_s >= self._timeout_s - TIME_ROUNDING_S
             if complete or timed_out:
                 newest_ready = max(newest_ready, number)
         # Releasing in order means a ready frame also flushes all older ones.

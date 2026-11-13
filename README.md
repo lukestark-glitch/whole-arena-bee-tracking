@@ -19,8 +19,10 @@ The full concept is in the [concept paper](docs/concept-paper.md), also availabl
 
 ## Status
 
-Early proof of concept. No hardware exists. Configuration, message formats and the
-simulator with its window are built (Stages 0 to 2); the tracker is next. The plan is to build the
+Early proof of concept. No hardware exists. Configuration, message formats, the
+simulator with its window and the tracking core are built (Stages 0 to 3). The control
+window is next. First baseline: 0.44 mm mean position error with 10 simulated bees
+(see [`CHANGELOG.md`](CHANGELOG.md)). The plan is to build the
 tracking software and test it against a simulator that behaves like the hardware would.
 Progress is tracked in [`docs/implementation-plan.md`](docs/implementation-plan.md).
 

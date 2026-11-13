@@ -137,3 +137,13 @@ def test_receive_frames_over_udp() -> None:
         frame = next(receive_frames(rx, make()))
     assert frame.frame == 1
     assert set(frame.detections) == set(CAMERAS)
+
+
+def test_timeout_is_not_delayed_by_rounded_times() -> None:
+    """With times rounded to microseconds a frame still times out after two periods."""
+    assembler = FrameAssembler(["cam-01", "cam-02"], 2.0 / 60.0)
+    late_by = []
+    for frame in range(300):
+        message = Detections("node-01", "cam-01", frame, round(frame / 60.0, 6), ())
+        late_by.extend(frame - released.frame for released in assembler.add(message))
+    assert late_by and set(late_by) == {2}
