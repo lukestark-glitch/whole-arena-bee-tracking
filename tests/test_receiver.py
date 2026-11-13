@@ -1,6 +1,4 @@
-"""Tests for frame assembly and the UDP receive loop in tracker/receiver.py."""
-
-import socket
+"""Tests for frame assembly, restart detection and datagram decoding in tracker/receiver.py."""
 
 from shared.protocol import (
     Detections,
@@ -8,12 +6,11 @@ from shared.protocol import (
     encode_detections,
     encode_robot_pose,
 )
-from tracker.receiver import FrameAssembler, receive_frames
+from tracker.receiver import FrameAssembler, frames_from_datagram
 
 PERIOD_S = 1 / 60
 TIMEOUT_S = 2 * PERIOD_S
 CAMERAS = ["c1", "c2", "c3"]
-SOCKET_TIMEOUT_S = 2.0
 
 
 def msg(camera: str, frame: int, bees=((1.0, 2.0, 3.0),), t: float | None = None) -> Detections:
@@ -120,23 +117,55 @@ def test_empty_bees_counts_as_reported() -> None:
     assert frames[0].detections["c1"] == ()
 
 
-def test_receive_frames_over_udp() -> None:
-    """receive_frames yields a frame and skips garbage and non-detections datagrams."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as rx, socket.socket(
-        socket.AF_INET, socket.SOCK_DGRAM
-    ) as tx:
-        rx.bind(("127.0.0.1", 0))
-        rx.settimeout(SOCKET_TIMEOUT_S)
-        address = rx.getsockname()
-        tx.sendto(b"garbage", address)
-        pose = RobotPose(t=0.0, rail_m=0.0, tilt_rad=0.0, focus_m=0.1)
-        tx.sendto(encode_robot_pose(pose), address)
+def test_frames_from_datagram() -> None:
+    """A valid datagram is assembled; garbage and non-detections give no frames."""
+    a = make()
+    pose = RobotPose(t=0.0, rail_m=0.0, tilt_rad=0.0, focus_m=0.1)
+    assert frames_from_datagram(a, b"garbage") == []
+    assert frames_from_datagram(a, encode_robot_pose(pose)) == []
+    frames: list = []
+    for camera in CAMERAS:
+        for datagram in encode_detections(msg(camera, 1)):
+            frames.extend(frames_from_datagram(a, datagram))
+    assert [f.frame for f in frames] == [1]
+    assert set(frames[0].detections) == set(CAMERAS)
+
+
+def _release_frames(a: FrameAssembler, numbers) -> list[int]:
+    """Send all cameras for each frame number; return the released frame numbers."""
+    released: list[int] = []
+    for number in numbers:
         for camera in CAMERAS:
-            for datagram in encode_detections(msg(camera, 1)):
-                tx.sendto(datagram, address)
-        frame = next(receive_frames(rx, make()))
-    assert frame.frame == 1
-    assert set(frame.detections) == set(CAMERAS)
+            released.extend(f.frame for f in a.add(msg(camera, number)))
+    return released
+
+
+def test_restart_starts_a_new_run() -> None:
+    """After frames up to 500, frame 0 starts a new run and frames 0, 1, 2 come out again."""
+    a = make()
+    _release_frames(a, range(501))
+    assert _release_frames(a, range(3)) == [0, 1, 2]
+
+
+def test_straggler_is_not_a_restart() -> None:
+    """A message 3 frames late is dropped and does not reset the assembler."""
+    a = make()
+    _release_frames(a, range(100))
+    assert a.add(msg("c1", 96)) == []
+    assert a.add(msg("c1", 100)) == []
+    assert _release_frames(a, [101]) == [100, 101]
+
+
+def test_last_report_per_camera() -> None:
+    """last_report_s holds the newest t per camera, omits silent ones, clears on restart."""
+    a = make()
+    a.add(msg("c1", 1))
+    a.add(msg("c1", 5))
+    a.add(msg("c2", 2))
+    assert a.last_report_s() == {"c1": 5 * PERIOD_S, "c2": 2 * PERIOD_S}
+    _release_frames(a, range(200))
+    a.add(msg("c3", 0))
+    assert a.last_report_s() == {"c3": 0.0}
 
 
 def test_timeout_is_not_delayed_by_rounded_times() -> None:

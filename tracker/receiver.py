@@ -5,21 +5,23 @@ reordered, so `FrameAssembler` collects them per frame number and releases a fra
 when every camera has reported or when a newer message proves the wait is over.
 Only the simulation time `t` carried in the messages drives the timeout; the tracker
 never reads a wall clock. The released `Frame` objects feed the tracking core.
+A frame number far below the last released one means the sender restarted; the assembler
+then starts over.
 """
 
 from __future__ import annotations
 
-import socket
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from shared.protocol import Detections, ProtocolError, decode
 
-# Large enough for the biggest datagram a UDP socket can deliver (IPv4 limit).
-RECV_BUFFER_BYTES = 65535
 # Senders round `t` to microseconds, so the difference of two times can come out this
 # much too small; without the slack a timeout of two frame periods would often take three.
 TIME_ROUNDING_S = 1e-6
+# A message this many frames below the last released frame is not a straggler (stragglers are
+# at most the timeout, a few frames, late) but the first of a restarted sender.
+RESTART_GAP_FRAMES = 60
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,7 @@ class FrameAssembler:
         self._timeout_s = timeout_s
         self._pending: dict[int, _Pending] = {}
         self._last_released = -1  # Frame numbers start at 0, so -1 means none yet.
+        self._last_report_s: dict[str, float] = {}
 
     def add(self, message: Detections) -> list[Frame]:
         """Add one message and return the frames that are now ready.
@@ -71,13 +74,34 @@ class FrameAssembler:
         Returns:
             Released frames, oldest first. Usually empty or one frame.
         """
-        if message.camera_id not in self._camera_ids or message.frame <= self._last_released:
+        if message.camera_id not in self._camera_ids:
+            return []
+        if message.frame < self._last_released - RESTART_GAP_FRAMES:
+            self._restart()
+        previous_report_s = self._last_report_s.get(message.camera_id, message.t)
+        self._last_report_s[message.camera_id] = max(previous_report_s, message.t)
+        if message.frame <= self._last_released:
             return []
         pending = self._pending.setdefault(message.frame, _Pending(t_s=message.t))
         # Parts of a large message share camera and frame; join them in arrival order.
         previous = pending.detections.get(message.camera_id, ())
         pending.detections[message.camera_id] = previous + message.bees
         return self._release_ready(message.t)
+
+    def last_report_s(self) -> dict[str, float]:
+        """Tell when each camera was last heard from.
+
+        Returns:
+            Camera id to the simulation time `t` in seconds of the newest message received
+            from it. Cameras never heard (since the last restart) are absent.
+        """
+        return dict(self._last_report_s)
+
+    def _restart(self) -> None:
+        """Forget pending frames, the release position and the camera reports."""
+        self._pending.clear()
+        self._last_released = -1
+        self._last_report_s.clear()
 
     def _release_ready(self, now_s: float) -> list[Frame]:
         """Release every frame that is complete or timed out, plus all older ones.
@@ -107,22 +131,22 @@ class FrameAssembler:
         return released
 
 
-def receive_frames(sock: socket.socket, assembler: FrameAssembler) -> Iterator[Frame]:
-    """Read datagrams forever and yield frames as they become ready.
+def frames_from_datagram(assembler: FrameAssembler, datagram: bytes) -> list[Frame]:
+    """Decode one datagram and hand a detections message to the assembler.
 
-    Datagrams that cannot be decoded, or that are not detections, are skipped.
+    Datagrams that cannot be decoded, or that are not detections, are ignored.
 
     Args:
-        sock: A bound UDP socket, created and configured by the caller.
         assembler: Assembler that groups the messages into frames.
+        datagram: Raw bytes received on the detections port.
 
-    Yields:
-        Released frames, oldest first.
+    Returns:
+        The frames that became ready, oldest first; usually empty or one frame.
     """
-    while True:
-        try:
-            message = decode(sock.recv(RECV_BUFFER_BYTES))
-        except ProtocolError:
-            continue
-        if isinstance(message, Detections):
-            yield from assembler.add(message)
+    try:
+        message = decode(datagram)
+    except ProtocolError:
+        return []
+    if not isinstance(message, Detections):
+        return []
+    return assembler.add(message)
