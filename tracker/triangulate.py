@@ -10,6 +10,7 @@ The tracker (association and filtering) consumes the `Points` produced here. Thi
 pure geometry: it uses no randomness, no wall clock and no ground truth.
 """
 
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,6 +21,7 @@ from shared.config import Arena, CameraModel, Config, TrackerSettings
 from shared.geometry import CameraPose, camera_pose, is_visible, pixel_to_ray
 
 NEW_POINT = -1  # `track_ids` value of a point that was not found for an existing track.
+NO_POINT = -1  # `ray_point` value of a ray that supports no point.
 
 # Cost given to a track/ray pair outside the claim gate. It only has to be larger than any gate
 # so that the assignment avoids such pairs; pairs that still get chosen are filtered afterwards.
@@ -67,11 +69,14 @@ class Rays:
         origins_m: Ray start points (camera positions), shape (N, 3), metres.
         directions: Unit direction vectors, shape (N, 3).
         camera_index: Index of the originating camera in the camera list, shape (N,).
+        detection_index: Position of the ray's detection inside its camera's detection
+            list, shape (N,).
     """
 
     origins_m: np.ndarray
     directions: np.ndarray
     camera_index: np.ndarray
+    detection_index: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -83,11 +88,14 @@ class Points:
         camera_counts: Number of cameras (rays) supporting each point, shape (P,).
         track_ids: Id of the track each point was found for, `NEW_POINT` for a new point,
             shape (P,).
+        ray_point: For every ray of the frame the row in `positions_m` of the point it
+            supports, or `NO_POINT`, shape (N,).
     """
 
     positions_m: np.ndarray
     camera_counts: np.ndarray
     track_ids: np.ndarray
+    ray_point: np.ndarray
 
 
 def tracking_cameras(config: Config) -> list[TrackingCamera]:
@@ -123,7 +131,7 @@ def frame_rays(
     Returns:
         All rays of the frame in arena-frame coordinates, grouped by camera.
     """
-    origins, directions, indices = [], [], []
+    origins, directions, indices, positions = [], [], [], []
     for index, camera in enumerate(cameras):
         entries = detections.get(camera.id, ())
         if not entries:
@@ -132,9 +140,15 @@ def frame_rays(
         directions.append(pixel_to_ray(camera.pose, camera.model, pixels_px))
         origins.append(np.tile(camera.pose.position_m, (len(entries), 1)))
         indices.append(np.full(len(entries), index, dtype=int))
+        positions.append(np.arange(len(entries)))
     if not indices:
         return _empty_rays()
-    return Rays(np.concatenate(origins), np.concatenate(directions), np.concatenate(indices))
+    return Rays(
+        np.concatenate(origins),
+        np.concatenate(directions),
+        np.concatenate(indices),
+        np.concatenate(positions),
+    )
 
 
 def closest_point_to_rays(origins_m: np.ndarray, directions: np.ndarray) -> np.ndarray:
@@ -211,10 +225,13 @@ def triangulate(
     """
     guided, used = guided_points(rays, track_ids, predicted_m, cameras, settings)
     new = new_points(rays, used, cameras, arena, settings)
+    # New points are numbered after the guided ones; a ray is never in both steps.
+    new_rows = np.where(new.ray_point == NO_POINT, NO_POINT, new.ray_point + len(guided.track_ids))
     return Points(
         np.concatenate([guided.positions_m, new.positions_m]),
         np.concatenate([guided.camera_counts, new.camera_counts]),
         np.concatenate([guided.track_ids, new.track_ids]),
+        np.where(guided.ray_point == NO_POINT, new_rows, guided.ray_point),
     )
 
 
@@ -245,7 +262,7 @@ def guided_points(
     """
     used = np.zeros(len(rays.camera_index), dtype=bool)
     if used.size == 0 or len(track_ids) == 0:
-        return _empty_points(), used
+        return _empty_points(len(used)), used
     claim_track, claim_ray = _claim_rays(rays, predicted_m, settings.claim_gate_m)
     fits = []
     for row in range(len(track_ids)):
@@ -256,7 +273,7 @@ def guided_points(
         if fit is not None:
             fits.append((track_ids[row], fit[0], claimed[fit[1]]))
     if not fits:
-        return _empty_points(), used
+        return _empty_points(len(used)), used
     required = _required_cameras(
         np.array([point_m for _, point_m, _ in fits]),
         cameras,
@@ -264,13 +281,16 @@ def guided_points(
         settings.min_cameras_tracked,
     )
     kept = [fit for fit, needed in zip(fits, required) if len(fit[2]) >= needed]
-    for _, _, ray_indices in kept:
+    ray_point = np.full(len(used), NO_POINT, dtype=int)
+    for row, (_, _, ray_indices) in enumerate(kept):
         used[ray_indices] = True
+        ray_point[ray_indices] = row
     return (
         _make_points(
             [point_m for _, point_m, _ in kept],
             [len(ray_indices) for _, _, ray_indices in kept],
             [track_id for track_id, _, _ in kept],
+            ray_point,
         ),
         used,
     )
@@ -297,14 +317,14 @@ def new_points(
     """
     free = np.flatnonzero(~used)
     if len(free) < _MIN_RAYS_FOR_POINT:
-        return _empty_points()
+        return _empty_points(len(used))
     origins, directions = rays.origins_m[free], rays.directions[free]
     camera_index = rays.camera_index[free]
     box = _arena_box(arena, settings)
     seeds = _pair_seeds(origins, directions, camera_index, settings.ray_tolerance_m, box)
     seeds = _thin_seeds(seeds, settings)
     if len(seeds) == 0:
-        return _empty_points()
+        return _empty_points(len(used))
     candidates = _support_candidates(
         seeds,
         origins,
@@ -315,34 +335,46 @@ def new_points(
         max(settings.min_cameras, _MIN_RAYS_FOR_POINT),
     )
     ordered = _order_candidates(*candidates, origins, directions, cameras, settings)
-    return _accept_greedily(ordered, origins, directions, box, settings)
+    accepted = _accept_greedily(ordered, origins, directions, box, settings)
+    ray_point = np.full(len(used), NO_POINT, dtype=int)
+    ray_point[free] = accepted.ray_point
+    return dataclasses.replace(accepted, ray_point=ray_point)
 
 
 def _empty_rays() -> Rays:
     """Return a `Rays` without any ray."""
-    return Rays(np.zeros((0, 3)), np.zeros((0, 3)), np.zeros(0, dtype=int))
+    return Rays(np.zeros((0, 3)), np.zeros((0, 3)), np.zeros(0, dtype=int), np.zeros(0, dtype=int))
 
 
-def _empty_points() -> Points:
-    """Return a `Points` without any point."""
-    return _make_points([], [], [])
+def _empty_points(ray_count: int) -> Points:
+    """Return a `Points` without any point.
+
+    Args:
+        ray_count: Number of rays of the frame.
+
+    Returns:
+        Empty points whose `ray_point` has `ray_count` entries of `NO_POINT`.
+    """
+    return _make_points([], [], [], np.full(ray_count, NO_POINT, dtype=int))
 
 
-def _make_points(positions: list, counts: list, ids: list) -> Points:
+def _make_points(positions: list, counts: list, ids: list, ray_point: np.ndarray) -> Points:
     """Pack lists of point data into a `Points` with the right shapes and dtypes.
 
     Args:
         positions: Points, each of shape (3,), metres.
         counts: Supporting camera count per point.
         ids: Track id per point.
+        ray_point: Point row per ray, `NO_POINT` for unused rays, shape (N,).
 
     Returns:
-        The packed points; shapes (P, 3), (P,), (P,).
+        The packed points; shapes (P, 3), (P,), (P,), (N,).
     """
     return Points(
         np.array(positions, dtype=float).reshape(-1, 3),
         np.array(counts, dtype=int),
         np.array(ids, dtype=int),
+        ray_point,
     )
 
 
@@ -735,9 +767,10 @@ def _accept_greedily(
         settings: Tracker settings.
 
     Returns:
-        The accepted points in acceptance order.
+        The accepted points in acceptance order; `ray_point` indexes the given rays.
     """
     taken = np.zeros(len(directions), dtype=bool)
+    ray_point = np.full(len(directions), NO_POINT, dtype=int)
     positions, counts = [], []
     for point_m, support, required in ordered:
         rays = support[support >= 0]
@@ -750,6 +783,7 @@ def _accept_greedily(
         if distances.max() > settings.ray_tolerance_m or not _inside(point_m, box):
             continue
         taken[free] = True
+        ray_point[free] = len(positions)
         positions.append(point_m)
         counts.append(len(free))
-    return _make_points(positions, counts, [NEW_POINT] * len(positions))
+    return _make_points(positions, counts, [NEW_POINT] * len(positions), ray_point)

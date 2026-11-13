@@ -101,3 +101,27 @@ def test_tracking_without_noise_is_nearly_exact() -> None:
     )
     _, metrics = _run_offline(dataclasses.replace(CONFIG, noise=quiet), seed=1, frames=300)
     assert metrics.mean_error_m < 0.0005
+
+
+def test_tracking_works_again_after_the_sender_restarts() -> None:
+    """Frames 0..120, then 0..60 of a fresh simulation: tracking resumes with only new tracks."""
+    period_s = 1.0 / frame_rate_hz(CONFIG)
+    assembler = FrameAssembler(
+        [camera.id for camera in CONFIG.cameras], CONFIG.tracker.frame_timeout_frames * period_s
+    )
+    tracker = create_tracker(CONFIG)
+    ids_before: set[int] = set()
+    for run_index, frames in enumerate((120, 60)):
+        simulation = create_simulation(CONFIG, 1, 1.0)
+        records = []
+        for _ in range(frames):
+            for item in step_simulation(simulation):
+                message = decode(item.datagram)
+                if isinstance(message, Detections):
+                    records.extend(process_frame(tracker, f) for f in assembler.add(message))
+        confirmed = {t["id"] for r in records for t in r["tracks"] if t["confirmed"]}
+        if run_index == 0:
+            ids_before = {t.id for t in tracker.track_set.tracks}
+        assert len(confirmed) >= 8
+    assert ids_before and min(t.id for t in tracker.track_set.tracks) > max(ids_before)
+    assert len(tracker.track_set.tracks) <= 12

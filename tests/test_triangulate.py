@@ -10,6 +10,7 @@ from shared.config import Arena, CameraModel, TrackerSettings
 from shared.geometry import camera_pose, project
 from tracker.triangulate import (
     NEW_POINT,
+    NO_POINT,
     Rays,
     TrackingCamera,
     closest_point_to_rays,
@@ -39,6 +40,9 @@ SETTINGS = TrackerSettings(
     initial_acceleration_sigma_m_s2=20.0,
     flying_above_m_s=0.15,
     sitting_below_m_s=0.05,
+    acceleration_smoothing_s=0.2,
+    prediction_lead_s=0.1,
+    node_silent_after_s=0.5,
 )
 CENTRE = (0.45, 0.15, 0.15)
 
@@ -185,6 +189,7 @@ def test_wrong_ray_is_dropped() -> None:
         np.vstack([rays.origins_m, rays.origins_m[0]]),
         np.vstack([rays.directions, bad]),
         np.append(rays.camera_index, 0),
+        np.append(rays.detection_index, 1),
     )
     points, _ = guided_points(with_bad, np.array([1]), predicted[None], cameras, SETTINGS)
     assert len(points.positions_m) == 1
@@ -234,8 +239,53 @@ def test_guided_point_needs_the_usual_share_of_cameras() -> None:
     cameras = _corner_cameras()
     truth = np.array([CENTRE])
     rays = _rays(cameras, truth)
-    two = Rays(rays.origins_m[:2], rays.directions[:2], rays.camera_index[:2])
+    two = Rays(
+        rays.origins_m[:2],
+        rays.directions[:2],
+        rays.camera_index[:2],
+        rays.detection_index[:2],
+    )
     guided, used = guided_points(two, np.array([4]), truth, cameras, SETTINGS)
     assert len(guided.positions_m) == 0 and not used.any()
     guided, used = guided_points(rays, np.array([4]), truth, cameras, SETTINGS)
     assert list(guided.track_ids) == [4] and used.all()
+
+
+def test_ray_point_maps_rays_of_new_points() -> None:
+    """Every ray of a new point maps to its row; rays of no point map to NO_POINT."""
+    cameras = _corner_cameras()
+    truth = np.array([CENTRE, (0.2, 0.1, 0.1)])
+    rays = _rays(cameras, truth)
+    found = triangulate(rays, *_no_tracks(), cameras, ARENA, SETTINGS)
+    assert len(found.positions_m) == 2
+    assert found.ray_point.shape == (len(rays.camera_index),)
+    for row, position_m in enumerate(found.positions_m):
+        supported = rays.detection_index[found.ray_point == row]
+        expected = int(np.argmin(np.linalg.norm(truth - position_m, axis=1)))
+        assert list(supported) == [expected] * len(cameras)
+    extra = Rays(*(np.concatenate([a, a[:1]]) for a in (
+        rays.origins_m, rays.directions, rays.camera_index, rays.detection_index)))
+    extra.directions[-1] = -extra.directions[-1]
+    assert triangulate(extra, *_no_tracks(), cameras, ARENA, SETTINGS).ray_point[-1] == NO_POINT
+
+
+def test_ray_point_in_concatenated_result() -> None:
+    """With one guided and one new point the row numbers of both are right."""
+    cameras = _corner_cameras()
+    truth = np.array([CENTRE, (0.2, 0.1, 0.1)])
+    rays = _rays(cameras, truth)
+    found = triangulate(rays, np.array([7]), truth[:1], cameras, ARENA, SETTINGS)
+    assert list(found.track_ids) == [7, NEW_POINT]
+    for row in (0, 1):
+        assert np.all(rays.detection_index[found.ray_point == row] == row)
+        assert np.sum(found.ray_point == row) == len(cameras)
+    assert not np.any(found.ray_point == NO_POINT)
+
+
+def test_detection_index_with_two_detections() -> None:
+    """A camera with two detections numbers its rays 0 and 1; others start at 0."""
+    cameras = _corner_cameras()[:2]
+    detections = {"c0": ((1.0, 2.0, 1.0), (3.0, 4.0, 1.0)), "c1": ((5.0, 6.0, 1.0),)}
+    rays = frame_rays(detections, cameras)
+    assert list(rays.camera_index) == [0, 0, 1]
+    assert list(rays.detection_index) == [0, 1, 0]
