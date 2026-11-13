@@ -59,3 +59,22 @@ def test_pixel_noise_std() -> None:
         for _ in range(5000)
     ]
     assert 0.4 < float(np.std(errors)) < 0.6
+
+
+def test_bee_on_the_lens_not_reported() -> None:
+    """A bee closer than its body length, or at the camera position, gives no blob."""
+    bees = [_bee(0, 0.0), _bee(1, 0.01), _bee(2, 0.5)]
+    got = observe_bees(POSE, MODEL, bees, BODY_LENGTH_M, QUIET, np.random.default_rng(0))
+    assert len(got) == 1
+    assert np.isfinite(got[0]).all()
+
+
+def test_noisy_points_stay_inside_image() -> None:
+    """Noise never moves a reported point outside the image."""
+    edge_bee = [_bee(0, 0.5, 0.0, 0.5 * np.tan(239.9 / focal_length_px(MODEL)))]
+    noisy = Noise(2.0, 0.0, 0.0, 0.0)
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        for u_px, v_px, _ in observe_bees(POSE, MODEL, edge_bee, BODY_LENGTH_M, noisy, rng):
+            assert 0.0 <= u_px < MODEL.width_px
+            assert 0.0 <= v_px < MODEL.height_px

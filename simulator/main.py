@@ -133,6 +133,8 @@ def main() -> None:
     parser.add_argument("--time-scale", type=float, default=1.0)
     parser.add_argument("--fast", action="store_true", help="no pacing")
     args = parser.parse_args()
+    if args.time_scale <= 0:
+        parser.error("--time-scale must be greater than 0")
     config = load_config(args.config)
     seed = config.seed if args.seed is None else args.seed
     try:
