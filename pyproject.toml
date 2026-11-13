@@ -16,5 +16,8 @@ dev = ["pytest", "pdoc"]
 [tool.setuptools]
 packages = ["shared", "simulator", "experiments"]
 
+[tool.setuptools.package-data]
+simulator = ["web/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

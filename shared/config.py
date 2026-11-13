@@ -100,12 +100,13 @@ class Bees:
 
 @dataclass(frozen=True)
 class Ports:
-    """UDP port numbers for each message stream."""
+    """Port numbers: one UDP port per message stream, one TCP port per browser window."""
 
     detections: int
     target: int
     robot_pose: int
     truth: int
+    simulator_window: int
 
 
 @dataclass(frozen=True)
@@ -409,6 +410,7 @@ def _parse_ports(raw: Any) -> Ports:
         target=int(_require(raw, "target", "ports")),
         robot_pose=int(_require(raw, "robot_pose", "ports")),
         truth=int(_require(raw, "truth", "ports")),
+        simulator_window=int(_require(raw, "simulator_window", "ports")),
     )
 
 

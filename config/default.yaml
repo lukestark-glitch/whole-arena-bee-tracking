@@ -125,9 +125,10 @@ bees:
   sit_to_walk_rate_hz: 0.3
   walk_to_sit_rate_hz: 0.3
 
-# UDP ports.
+# Ports: UDP for the messages, TCP for the browser window.
 ports:
   detections: 5005    # camera nodes to tracker
   target: 5006        # tracker to robot
   robot_pose: 5007    # robot to tracker
   truth: 5008         # simulator to metrics only
+  simulator_window: 8765   # page and WebSocket of the simulator window (TCP)
