@@ -251,6 +251,7 @@ def scene_message(config: Config) -> str:
             "type": "scene",
             "arena_size_m": list(config.arena.size_m),
             "prediction_lead_s": config.tracker.prediction_lead_s,
+            "min_cameras": config.tracker.min_cameras,
             "cameras": cameras,
             "nodes": nodes,
         },
@@ -289,7 +290,10 @@ def _health(config: Config, t_s: float, last_report_s: dict[str, float]) -> dict
         `t_s`) and `silent_nodes` (nodes whose cameras are all at least the limit old).
     """
     # A camera never heard counts as last heard at time zero, so its age is the frame time.
-    age_s = {camera.id: t_s - last_report_s.get(camera.id, 0.0) for camera in config.cameras}
+    # A frame released by timeout is older than the newest report, hence the lower bound.
+    age_s = {
+        camera.id: max(0.0, t_s - last_report_s.get(camera.id, 0.0)) for camera in config.cameras
+    }
     limit_s = config.tracker.node_silent_after_s
     silent = [
         node.id
@@ -493,11 +497,15 @@ async def _control_window(session: _Session, connection: ServerConnection) -> No
         session.connections.add(connection)
         _resend_snapshot(session)
         async for raw in connection:
+            before = session.tracker.selected_id
             try:
                 apply_selection(session.tracker, raw)
-            except ValueError as error:
+            except (ValueError, RecursionError) as error:
+                # Deeply nested JSON ends in a RecursionError, not a ValueError.
                 print(f"ignored control window message: {error}", file=sys.stderr)
-            else:
+            # Only a real change is worth a snapshot; a flood of repeats must not keep the
+            # loop from reading detections.
+            if session.tracker.selected_id != before:
                 _resend_snapshot(session)
     except ConnectionClosed:
         pass

@@ -21,7 +21,7 @@ from shared.protocol import Detections, ProtocolError, decode
 TIME_ROUNDING_S = 1e-6
 # A message this many frames below the last released frame is not a straggler (stragglers are
 # at most the timeout, a few frames, late) but the first of a restarted sender.
-RESTART_GAP_FRAMES = 60
+RESTART_GAP_FRAMES = 10
 
 
 @dataclass(frozen=True)

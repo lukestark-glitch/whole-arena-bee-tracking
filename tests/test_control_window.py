@@ -279,3 +279,16 @@ def test_missing_page_is_404(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     with _running(tmp_path) as config:
         status, _ = _get(config.ports.control_window)
     assert status == 404
+
+
+def test_camera_age_is_never_negative() -> None:
+    """A report newer than the frame (frame released by timeout) gives age 0, not below."""
+    tracker, frame, last_report_s = _feed(30)
+    newer = {camera_id: t_s + 0.05 for camera_id, t_s in last_report_s.items()}
+    health = json.loads(tracks_message(tracker, frame, CONFIG, newer))["health"]
+    assert set(health["camera_age_s"].values()) == {0.0}
+
+
+def test_scene_carries_the_camera_minimum() -> None:
+    """The page gets the warning threshold from the tracker settings, not a copy."""
+    assert json.loads(scene_message(CONFIG))["min_cameras"] == CONFIG.tracker.min_cameras

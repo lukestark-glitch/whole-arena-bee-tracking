@@ -134,7 +134,6 @@ const CAMERA_MARKER_SIZE_M = 0.01;
 const PICK_RADIUS_PX = 14;
 const CLICK_MOVE_LIMIT_PX = 5;
 const GOLDEN_ANGLE_DEG = 137.508;      // spreads consecutive ids evenly around the hue circle
-const MIN_CAMERAS_PER_TRACK = 3;       // fewer supporting cameras than this triggers a warning
 const CAM_CANVAS_WIDTH_PX = 150;
 const MIN_DETECTION_RADIUS_PX = 2;
 const DEFAULT_ARENA_M = [0.9, 0.3, 0.3];
@@ -172,7 +171,7 @@ const cameraOkMaterial = new THREE.MeshBasicMaterial({ color: 0x10b981 });
 const cameraSilentMaterial = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
 
 const trackViews = new Map();   // track id -> display objects of that track
-let sceneInfo = { cameras: [], nodes: [] };
+let sceneInfo = { nodes: [], minCameras: 0 };   // from the scene message
 let cameraNode = new Map();     // camera id -> node id
 let cameraMarkers = new Map();  // camera id -> marker mesh
 let camPanels = new Map();      // camera id -> { box, canvas, width, height }
@@ -297,7 +296,9 @@ function updateTrackView(view, track, t) {
   view.halo.visible = selected;
   view.label.style.display = track.confirmed ? "" : "none";
 
-  view.points.push({ t, pos });
+  // A snapshot can be sent again while the simulation is paused; add its point only once.
+  const last = view.points[view.points.length - 1];
+  if (!last || last.t !== t) view.points.push({ t, pos });
   while (view.points.length > 0 && view.points[0].t < t - TRAIL_SECONDS) view.points.shift();
   setLinePoints(view.trail, view.points.map(p => p.pos));
 
@@ -475,9 +476,9 @@ function updateHealth(msg) {
   const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
   $("cam-stats").textContent =
     `min ${Math.min(...counts)} / mean ${mean.toFixed(1)} / max ${Math.max(...counts)}`;
-  const low = counts.filter(c => c < MIN_CAMERAS_PER_TRACK).length;
+  const low = counts.filter(c => c < sceneInfo.minCameras).length;
   $("cam-warning").textContent =
-    low ? `Warning: ${low} track(s) seen by fewer than ${MIN_CAMERAS_PER_TRACK} cameras` : "";
+    low ? `Warning: ${low} track(s) seen by fewer than ${sceneInfo.minCameras} cameras` : "";
 }
 
 // Colour camera markers red for cameras of silent nodes.
@@ -507,7 +508,7 @@ function buildCameraPanels(cameras) {
 }
 
 // Draw one camera's detections of the latest message.
-function drawCameraPanel(camId, panel, detections, textColor) {
+function drawCameraPanel(panel, detections) {
   const ctx = panel.canvas.getContext("2d");
   const sx = panel.canvas.width / panel.width_px, sy = panel.canvas.height / panel.height_px;
   ctx.clearRect(0, 0, panel.canvas.width, panel.canvas.height);
@@ -532,19 +533,18 @@ function drawCameraPanel(camId, panel, detections, textColor) {
 
 // Redraw all camera panels from the latest message.
 function drawCameraPanels() {
-  const textColor = getComputedStyle(document.body).color;
   const detections = lastTracks ? lastTracks.detections : {};
   for (const [camId, panel] of camPanels) {
     const silent = silentNodes.has(cameraNode.get(camId));
     panel.box.classList.toggle("silent", silent);
-    drawCameraPanel(camId, panel, silent ? [] : (detections[camId] || []), textColor);
+    drawCameraPanel(panel, silent ? [] : (detections[camId] || []));
   }
 }
 
 // ---- messages ----
 // Rebuild everything from a scene message.
 function handleScene(msg) {
-  sceneInfo = { cameras: msg.cameras, nodes: msg.nodes };
+  sceneInfo = { nodes: msg.nodes, minCameras: msg.min_cameras };
   cameraNode = new Map();
   for (const n of msg.nodes) for (const c of n.cameras) cameraNode.set(c, n.id);
   silentNodes = new Set();
