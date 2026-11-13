@@ -223,6 +223,11 @@ def _pack(fields: dict[str, Any], lists: dict[str, list[Any]]) -> list[bytes]:
         ProtocolError: If a single entry does not fit in one datagram.
     """
     first_key = next(iter(lists))
+    # Almost every message fits in one datagram; trying that first avoids encoding
+    # the message once per entry in the loop below.
+    whole = {key: entries for key, entries in lists.items() if entries or key == first_key}
+    if _fits(fields, whole):
+        return [_dumps({**fields, **whole})]
     datagrams: list[bytes] = []
     current: dict[str, list[Any]] = {first_key: []}
     for key, entries in lists.items():
