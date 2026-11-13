@@ -146,7 +146,7 @@ The page loads three.js from a CDN, so the first load needs an internet connecti
 - "Camera nodes" stops and restarts single nodes.
 - "Robot" shows rail, tilt and focus, and has sliders for the speed and acceleration limits
   of rail and tilt. They apply at once and last until the simulator stops.
-- The purple model is the robot: rail, carriage and camera head with a line to the focus
+- The robot model has a rail, a carriage and a camera head with lens, and a line to the focus
   plane. "Cinema view" is what its cinema camera sees.
 
 Control window: start the tracker, then open <http://127.0.0.1:8766/>. Put both windows
