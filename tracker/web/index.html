@@ -9,7 +9,7 @@
     --bg: #f3f4f6; --panel: #ffffffee; --text: #1f2933; --muted: #6b7280;
     --border: #d1d5db; --accent: #2563eb; --canvas: #e5e7eb; --row-sel: #dbeafe;
     --ok: #16a34a; --bad: #dc2626; --strip-bg: #f9fafbf2;
-    --panel-w: 300px; --strip-h: 190px;
+    --panel-w: 300px; --strip-h: 42vh;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -58,14 +58,22 @@
     display: flex; flex-direction: column; }
   #strip-head { flex: none; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
   #strip-head button { padding: 2px 8px; }
-  #strip-body { flex: 1; display: flex; gap: 8px; padding: 0 8px 8px; overflow-x: auto;
-    overflow-y: hidden; align-items: flex-start; }
+  #strip-body { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 0 8px 8px; }
+  #cinema-box { flex: none; position: relative; height: 100%; aspect-ratio: 16 / 9;
+    max-width: 55%; background: #000; border-radius: 4px; overflow: hidden; }
+  #cinema { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #cinema-note { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; text-align: center; padding: 8px; }
+  #cinema-note[hidden] { display: none; }
+  #cam-grid { flex: 1; min-width: 0; display: grid; gap: 8px; align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    overflow-x: hidden; overflow-y: auto; }
   body.strip-collapsed { --strip-h: 28px; }
   body.strip-collapsed #strip-body { display: none; }
-  .cam { flex: none; font-size: 11px; }
+  .cam { min-width: 0; font-size: 11px; }
   .cam-title { color: var(--muted); }
   .cam-box { position: relative; border: 2px solid var(--border); background: var(--canvas); }
-  .cam-box canvas { display: block; }
+  .cam-box canvas { display: block; width: 100%; height: auto; }
   .cam-box.silent { border-color: var(--bad); }
   .cam-box .nodata { display: none; position: absolute; inset: 0; align-items: center;
     justify-content: center; color: var(--bad); font-weight: 600; }
@@ -96,10 +104,6 @@
   </table>
   <div style="margin-top:8px"><button id="clear">Clear</button></div>
 
-  <h2>Cinema view</h2>
-  <img id="cinema" alt="cinema view of the robot" style="width:100%;display:block;background:#000">
-  <div class="empty" id="cinema-note">needs an open simulator window</div>
-
   <h2>Tracks</h2>
   <div id="track-list"><div class="empty">no tracks</div></div>
 
@@ -111,8 +115,14 @@
 
 <div id="strip">
   <div id="strip-head"><button id="strip-toggle">Cameras</button>
-    <span class="empty">detections of the latest message</span></div>
-  <div id="strip-body"></div>
+    <span class="empty">cinema view of the robot, and detections of the latest message</span></div>
+  <div id="strip-body">
+    <div id="cinema-box">
+      <img id="cinema" alt="cinema view of the robot">
+      <div class="empty" id="cinema-note">cinema view: needs an open simulator window</div>
+    </div>
+    <div id="cam-grid"></div>
+  </div>
 </div>
 
 <script type="importmap">
@@ -497,7 +507,7 @@ function updateCameraMarkers() {
 // Build one small canvas per camera in scene order.
 function buildCameraPanels(cameras) {
   camPanels = new Map();
-  $("strip-body").replaceChildren(...cameras.map(cam => {
+  $("cam-grid").replaceChildren(...cameras.map(cam => {
     const wrap = document.createElement("div");
     wrap.className = "cam";
     const height = Math.round(CAM_CANVAS_WIDTH_PX * cam.height_px / cam.width_px);
