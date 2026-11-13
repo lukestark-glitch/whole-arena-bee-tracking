@@ -181,11 +181,11 @@ def _vec(values: Vec3, decimals: int) -> list[float]:
     return [round(value, decimals) for value in values]
 
 
-def _dumps(fields: dict[str, Any]) -> bytes:
-    """Serialise a message dictionary as compact UTF-8 JSON.
+def _dumps(fields: Any) -> bytes:
+    """Serialise a message dictionary, or a part of one, as compact UTF-8 JSON.
 
     Args:
-        fields: JSON-compatible message fields.
+        fields: JSON-compatible message fields or a single list entry.
 
     Returns:
         The datagram payload.
@@ -230,19 +230,42 @@ def _pack(fields: dict[str, Any], lists: dict[str, list[Any]]) -> list[bytes]:
         return [_dumps({**fields, **whole})]
     datagrams: list[bytes] = []
     current: dict[str, list[Any]] = {first_key: []}
+    empty_bytes = len(_dumps({**fields, **current}))
+    size_bytes = empty_bytes
     for key, entries in lists.items():
         for entry in entries:
-            trial = {k: [*v] for k, v in current.items()}
-            trial.setdefault(key, []).append(entry)
-            if not _fits(fields, trial):
+            if size_bytes + _added_bytes(current, key, entry) >= MAX_DATAGRAM_BYTES:
                 datagrams.append(_dumps({**fields, **current}))
-                # For the first list both keys are the same and the entry wins.
-                trial = {first_key: [], key: [entry]}
-                if not _fits(fields, trial):
+                current = {first_key: []}
+                size_bytes = empty_bytes
+                if size_bytes + _added_bytes(current, key, entry) >= MAX_DATAGRAM_BYTES:
                     raise ProtocolError(f"a single {key} entry exceeds the datagram limit")
-            current = trial
+            size_bytes += _added_bytes(current, key, entry)
+            current.setdefault(key, []).append(entry)
     datagrams.append(_dumps({**fields, **current}))
     return datagrams
+
+
+def _added_bytes(current: dict[str, list[Any]], key: str, entry: Any) -> int:
+    """Return by how many bytes a datagram grows when an entry is appended to a list.
+
+    Compact JSON is additive, so the size can be tracked without encoding the whole
+    message again for every entry.
+
+    Args:
+        current: Lists already in the datagram.
+        key: Name of the list the entry goes to.
+        entry: JSON-compatible entry.
+
+    Returns:
+        Bytes of the entry plus its separator, plus the list itself if it is new.
+    """
+    entry_bytes = len(_dumps(entry))
+    if key not in current:
+        # A new list adds `,"key":[]`, one byte less than the object `{"key":[]}`.
+        return entry_bytes + len(_dumps({key: []})) - 1
+    # Every entry after the first is preceded by a comma.
+    return entry_bytes + (1 if current[key] else 0)
 
 
 def encode_detections(message: Detections) -> list[bytes]:
