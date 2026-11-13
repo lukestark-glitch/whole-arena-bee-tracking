@@ -18,6 +18,7 @@ packages = ["shared", "simulator", "tracker", "experiments"]
 
 [tool.setuptools.package-data]
 simulator = ["web/*"]
+tracker = ["web/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

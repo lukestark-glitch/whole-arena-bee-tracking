@@ -9,6 +9,7 @@ from tracker.tracks import (
     SITTING,
     Track,
     assign,
+    extrapolate,
     create_track_set,
     predict_tracks,
     update_tracks,
@@ -31,19 +32,22 @@ SETTINGS = TrackerSettings(
     initial_acceleration_sigma_m_s2=20.0,
     flying_above_m_s=0.15,
     sitting_below_m_s=0.05,
+    acceleration_smoothing_s=0.2,
+    prediction_lead_s=0.1,
+    node_silent_after_s=0.5,
 )
 DT_S = 1.0 / 60.0
 
 
 def step(track_set, frame_index, points, ids=None, counts=None):
-    """Run one frame: predict to its time, then update with the given points."""
+    """Run one frame: predict to its time, update with the points; return the point track ids."""
     points = np.asarray(points, dtype=float).reshape(-1, 3)
     n = len(points)
     ids = np.full(n, NEW_POINT) if ids is None else np.asarray(ids, dtype=int)
     counts = np.full(n, 3) if counts is None else np.asarray(counts, dtype=int)
     t_s = frame_index * DT_S
     predict_tracks(track_set, t_s, SETTINGS)
-    update_tracks(track_set, points, counts, ids, t_s, SETTINGS)
+    return update_tracks(track_set, points, counts, ids, t_s, SETTINGS)
 
 
 def run_line(velocity_m_s, frames, noise_sigma_m=0.0, rng=None):
@@ -198,3 +202,57 @@ def test_covariance_stays_symmetric_positive_definite():
     covariance = run_line(np.array([0.5, 0.2, -0.1]), 600, 0.002, rng).tracks[0].covariance
     assert np.allclose(covariance, covariance.T)
     assert np.all(np.linalg.eigvalsh((covariance + covariance.T) / 2.0) > 0.0)
+
+
+def test_update_returns_track_id_per_point():
+    """A labelled point, an assigned point and a new point get the ids of their tracks."""
+    track_set = create_track_set()
+    step(track_set, 0, [[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
+    first, second = (t.id for t in track_set.tracks)
+    ids = step(track_set, 1, [[0.5, 0.001, 0.0], [0.0, 0.0, 0.0], [0.2, 0.2, 0.2]], ids=[second, NEW_POINT, NEW_POINT])
+    assert list(ids) == [second, first, track_set.next_id - 1]
+    assert track_set.next_id == 3
+
+
+def _smoothed_run(noise_sigma_m, rng):
+    """Follow p = a t^2 / 2 for 3 s; return the raw and smoothed acceleration per frame."""
+    acceleration = np.array([2.0, 0.0, -1.0])
+    track_set = create_track_set()
+    raw, smooth = [], []
+    for k in range(180):
+        point = acceleration * (k * DT_S) ** 2 / 2.0 + rng.normal(0.0, noise_sigma_m, 3)
+        step(track_set, k, [point])
+        raw.append(track_set.tracks[0].state[6:9].copy())
+        smooth.append(track_set.tracks[0].smoothed_acceleration.copy())
+    return acceleration, np.array(raw), np.array(smooth)
+
+
+def test_smoothed_acceleration_converges():
+    """Exact positions of a constant acceleration give the smoothed value within 0.5 m/s^2."""
+    acceleration, _, smooth = _smoothed_run(0.0, np.random.default_rng(0))
+    assert np.allclose(smooth[-1], acceleration, atol=0.5)
+
+
+def test_smoothed_acceleration_is_smoother_than_the_filter():
+    """Under 1 mm noise the smoothed acceleration jumps less from frame to frame."""
+    _, raw, smooth = _smoothed_run(0.001, np.random.default_rng(5))
+    assert np.abs(np.diff(smooth[60:], axis=0)).mean() < np.abs(np.diff(raw[60:], axis=0)).mean()
+
+
+def test_new_track_has_zero_smoothed_acceleration():
+    """A new track starts with zero smoothed acceleration."""
+    track_set = create_track_set()
+    step(track_set, 0, [[0.0, 0.0, 0.0]])
+    assert np.all(track_set.tracks[0].smoothed_acceleration == 0.0)
+
+
+def test_extrapolate_constant_acceleration():
+    """extrapolate gives p + v dt + a dt^2 / 2 and leaves the track alone."""
+    track_set = create_track_set()
+    step(track_set, 0, [[1.0, 2.0, 3.0]])
+    track = track_set.tracks[0]
+    track.state[3:6] = [1.0, 0.0, -1.0]
+    track.state[6:9] = [2.0, 4.0, 0.0]
+    before = track.state.copy()
+    assert np.allclose(extrapolate(track, track.t_s + 0.5), [1.0 + 0.5 + 0.25, 2.0 + 0.5, 3.0 - 0.5])
+    assert np.array_equal(track.state, before)
