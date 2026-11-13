@@ -19,8 +19,9 @@ The full concept is in the [concept paper](docs/concept-paper.md), also availabl
 
 ## Status
 
-Early proof of concept. No hardware exists. Configuration and message formats are built
-(Stage 0); simulator and tracker are next. The plan is to build the
+Early proof of concept. No hardware exists. Configuration, message formats and a
+simulator without a window are built (Stages 0 and 1); the simulator window and the tracker
+are next. The plan is to build the
 tracking software and test it against a simulator that behaves like the hardware would.
 Progress is tracked in [`docs/implementation-plan.md`](docs/implementation-plan.md).
 
