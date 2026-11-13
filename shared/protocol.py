@@ -21,6 +21,9 @@ PROTOCOL_VERSION = 1
 # (1500 byte MTU minus IP and UDP headers, with margin) and is never fragmented.
 MAX_DATAGRAM_BYTES = 1400
 
+# docs/protocol.md fixes the transport to UDP on localhost.
+UDP_HOST = "127.0.0.1"
+
 # Sender rounding keeps datagrams small; sub-pixel and sub-0.1 mm detail is noise.
 PIXEL_DECIMALS = 2  # u, v and blob size, in pixels
 METRE_DECIMALS = 4  # positions and distances, in metres
@@ -220,6 +223,11 @@ def _pack(fields: dict[str, Any], lists: dict[str, list[Any]]) -> list[bytes]:
         ProtocolError: If a single entry does not fit in one datagram.
     """
     first_key = next(iter(lists))
+    # Almost every message fits in one datagram; trying that first avoids encoding
+    # the message once per entry in the loop below.
+    whole = {key: entries for key, entries in lists.items() if entries or key == first_key}
+    if _fits(fields, whole):
+        return [_dumps({**fields, **whole})]
     datagrams: list[bytes] = []
     current: dict[str, list[Any]] = {first_key: []}
     for key, entries in lists.items():
