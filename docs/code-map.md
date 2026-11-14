@@ -22,7 +22,9 @@ Each package gets a section. Each module gets one row.
 | `shared/config.py` | Load and validate `config/*.yaml` into dataclasses | `load_config`, `load_robot`, `frame_rate_hz`, `last_frame_of`, `ConfigError`, `Config`, `Arena`, `CameraModel`, `Camera`, `Node`, `Noise`, `Bees`, `TrackerSettings`, `Ports`, `Robot`, `AxisLimits`, `Cinema`, `StereoCamera`, `RobotControl`, `CalibrationSettings`, `Marker` | simulator, robot_emulator, tracker, experiments |
 | `shared/protocol.py` | Build and parse the UDP messages of `docs/protocol.md` | `encode_detections`, `encode_target`, `encode_robot_pose`, `encode_truth`, `decode`, `ProtocolError`, `Detections`, `Target`, `OtherBee`, `RobotPose`, `Truth`, `TruthBee`, `RobotAxes`, `UDP_HOST` | simulator, tracker, experiments |
 | `shared/wand.py` | Schedule of the calibration wand run: reference points, sweep, stop points | `wand_phase`, `wand_duration_s`, `REFERENCE`, `SWEEP`, `STOP`, `DONE` | simulator, tracker |
-| `shared/web.py` | Serve a window's page on the port of its WebSocket | `page_response` | simulator, tracker |
+| `shared/web.py` | Serve a window's page and the shared files on the port of its WebSocket | `page_response` | simulator, tracker |
+| `shared/web/models.js` | 3D models of both windows: bee, robot, arena, camera body; merged geometry, shared materials | `createBee`, `poseBee`, `wingPhase`, `buildRobotModel`, `poseRobotModel`, `buildArenaModel`, `createCameraGeometry` | both pages |
+| `shared/web/style.css` | Colours, panel, cards, buttons, sliders and switches of both windows | - | both pages |
 | `shared/geometry.py` | Equidistant fisheye camera model: pose, projection, rays, visibility. Pose of the robot's cameras from its axes, and what the cinema camera frames | `camera_pose`, `focal_length_px`, `project`, `pixel_to_ray`, `is_visible`, `robot_camera_pose`, `cinema_view`, `CameraPose` | simulator, robot_emulator, tracker, experiments |
 
 ## `config/`
