@@ -19,6 +19,7 @@ from shared.protocol import (
     decode,
     encode_target,
 )
+from shared.wand import STOP, wand_duration_s, wand_phase
 from simulator.main import (
     Simulation,
     apply_control,
@@ -328,3 +329,70 @@ def test_target_of_an_earlier_run_is_ignored() -> None:
     assert simulation.controller.target is None
     apply_target(simulation, encode_target(dataclasses.replace(target, t=0.0)))
     assert simulation.controller.target is not None
+
+
+def _detections_of(simulation: Simulation) -> list[Detections]:
+    """Step one frame and return its detections messages."""
+    return [m for m in _step_one(simulation) if isinstance(m, Detections)]
+
+
+def test_wand_run_has_one_point_and_the_robot_aims_at_it() -> None:
+    """In a wand run the truth holds only the wand, and the robot points at it at a stop."""
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0, wand=True)
+    settings = CONFIG.calibration
+    last_stop_s = wand_duration_s(settings) - settings.stop_dwell_s / 4
+    truth = None
+    for _ in range(round(last_stop_s * 60)):
+        truth = next(m for m in _step_one(simulation) if isinstance(m, Truth))
+        assert len(truth.bees) == 1
+    assert wand_phase(settings, truth.t)[0] == STOP
+    wand = truth.bees[0].pos
+    start = ROBOT.rail_start_m
+    assert truth.robot.rail_m == pytest.approx(wand[0] - start[0], abs=1e-4)
+    tilt_rad = math.atan2(wand[2] - start[2], wand[1] - start[1])
+    assert truth.robot.tilt_rad == pytest.approx(tilt_rad, abs=1e-4)
+    assert truth.robot.focus_m == pytest.approx(
+        math.hypot(wand[1] - start[1], wand[2] - start[2]), abs=1e-4
+    )
+
+
+def test_miscalibrated_cameras_are_off_by_the_configured_error() -> None:
+    """Every true camera is 1 cm and 2 degrees away from its nominal pose; the robot is shifted."""
+    nominal = create_simulation(CONFIG, ROBOT, 1, 1.0)
+    off = create_simulation(CONFIG, ROBOT, 1, 1.0, miscalibrated=True)
+    settings = CONFIG.calibration
+    for camera_id, pose in nominal.poses.items():
+        moved_m = np.linalg.norm(off.poses[camera_id].position_m - pose.position_m)
+        assert moved_m == pytest.approx(settings.camera_error_position_m)
+    shift = np.array(off.controller.robot.rail_start_m) - np.array(ROBOT.rail_start_m)
+    assert shift == pytest.approx(np.array(settings.robot_error_m))
+    # The bees are the same in both: the errors come from a generator of their own.
+    assert all(
+        np.array_equal(a.position_m, b.position_m) for a, b in zip(nominal.bees, off.bees)
+    )
+
+
+def test_markers_are_reported_once_per_second() -> None:
+    """Frame 0 and frame 60 carry wall markers of every camera, the frames between none."""
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
+    with_markers = []
+    for frame in range(61):
+        if any(d.markers for d in _detections_of(simulation)):
+            with_markers.append(frame)
+    assert with_markers == [0, 60]
+
+
+def test_displaced_camera_sees_the_markers_elsewhere() -> None:
+    """Displacing a camera shifts its marker pixels; a bad value is refused."""
+    quiet = dataclasses.replace(CONFIG, noise=dataclasses.replace(CONFIG.noise, pixel_sigma_px=0.0))
+    before = create_simulation(quiet, ROBOT, 1, 1.0)
+    after = create_simulation(quiet, ROBOT, 1, 1.0)
+    apply_control(after, "camera_displaced", {"camera_id": "cam-06", "angle_rad": 0.02})
+    seen = {d.camera_id: d.markers for d in _detections_of(before)}
+    moved = {d.camera_id: d.markers for d in _detections_of(after)}
+    assert seen["cam-01"] == moved["cam-01"]
+    assert seen["cam-06"] != moved["cam-06"]
+    with pytest.raises(ValueError):
+        apply_control(after, "camera_displaced", {"camera_id": "cam-99", "angle_rad": 0.02})
+    with pytest.raises(ValueError):
+        apply_control(after, "camera_displaced", {"camera_id": "cam-06", "angle_rad": 1.0})
