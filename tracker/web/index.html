@@ -75,6 +75,7 @@
     <h2>Display</h2>
     <label class="switch"><input type="checkbox" id="show-robot" checked>Show robot</label>
     <label class="switch"><input type="checkbox" id="show-trails" checked>Show trails</label>
+    <label class="switch"><input type="checkbox" id="show-camera-ids">Show camera IDs</label>
   </div>
 
   <div class="card">
@@ -124,7 +125,8 @@
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { buildRobotModel, poseRobotModel, buildArenaModel } from "/models.js";
+import { createBee, poseBee, wingPhase, buildRobotModel, poseRobotModel, buildArenaModel,
+         createCameraModel, setCameraRunning, createCameraLabels, placeCameraLabels } from "/models.js";
 
 // ---- constants ----
 const RECONNECT_DELAY_MS = 1000;
@@ -132,13 +134,12 @@ let cinemaSocket = null;   // image stream of the cinema view, from the simulato
 const TRAIL_SECONDS = 2;               // simulation seconds of trail kept per track
 const TRAIL_MAX_POINTS = 256;          // buffer size per trail; snapshots come at most 30 times per second
 const MAX_PIXEL_RATIO = 2;             // a higher ratio costs frame rate and adds little
-const TRACK_RADIUS_M = 0.008;          // display size, enlarged to be visible
-const PROBATION_SCALE = 0.6;
+const TRACK_BEE_LENGTH_M = 0.018;      // display size of a confirmed track, smaller than in the simulator
+const PROBATION_RADIUS_M = 0.005;      // a track on probation is a faint dot
 const PROBATION_OPACITY = 0.4;
 const SELECTED_SCALE = 1.6;
 const HALO_RADIUS_M = 0.02;
 const PRED_MARKER_RADIUS_M = 0.003;
-const CAMERA_MARKER_SIZE_M = 0.01;
 const PICK_RADIUS_PX = 14;
 const CLICK_MOVE_LIMIT_PX = 5;
 const GOLDEN_ANGLE_DEG = 137.508;      // spreads consecutive ids evenly around the hue circle
@@ -170,13 +171,9 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.6);
 sun.position.set(0.5, -1, 2);
 scene.add(sun);
 
-const sphereGeometry = new THREE.SphereGeometry(TRACK_RADIUS_M, 12, 8);
+const dotGeometry = new THREE.SphereGeometry(PROBATION_RADIUS_M, 12, 8);
 const haloGeometry = new THREE.SphereGeometry(HALO_RADIUS_M, 16, 12);
 const predGeometry = new THREE.SphereGeometry(PRED_MARKER_RADIUS_M, 8, 6);
-const cameraMarkerGeometry = new THREE.BoxGeometry(CAMERA_MARKER_SIZE_M, CAMERA_MARKER_SIZE_M,
-  CAMERA_MARKER_SIZE_M);
-const cameraOkMaterial = new THREE.MeshBasicMaterial({ color: 0x10b981 });
-const cameraSilentMaterial = new THREE.MeshBasicMaterial({ color: 0xdc2626 });
 
 const robotGroup = new THREE.Group();   // the robot as its own robot_pose reports it
 robotGroup.visible = false;
@@ -187,7 +184,8 @@ let robotModel = null;          // moving parts of the robot model
 const trackViews = new Map();   // track id -> display objects of that track
 let sceneInfo = { nodes: [], minCameras: 0 };   // from the scene message
 let cameraNode = new Map();     // camera id -> node id
-let cameraMarkers = new Map();  // camera id -> marker mesh
+let cameraMarkers = new Map();  // camera id -> camera model
+let cameraLabels = [];          // id labels of the tracking cameras
 let camPanels = new Map();      // camera id -> { box, canvas, width, height }
 let silentNodes = new Set();
 let lastTracks = null;
@@ -222,8 +220,7 @@ function disposeObject(obj, keep) {
   });
 }
 
-const SHARED = new Set([sphereGeometry, haloGeometry, predGeometry, cameraMarkerGeometry,
-  cameraOkMaterial, cameraSilentMaterial]);
+const SHARED = new Set([dotGeometry, haloGeometry, predGeometry]);
 
 // Remove and dispose all children of a group.
 function clearGroup(group) {
@@ -239,16 +236,17 @@ function buildArena(size) {
   arenaGroup.add(buildArenaModel(size));
 }
 
-// Build a small marker for each camera.
+// Build the camera model and the id label of each camera. The models share their geometry
+// and materials, so the old ones are only removed, not disposed.
 function buildCameraMarkers(cameras) {
-  clearGroup(cameraGroup);
+  cameraGroup.clear();
   cameraMarkers = new Map();
   for (const cam of cameras) {
-    const marker = new THREE.Mesh(cameraMarkerGeometry, cameraOkMaterial);
-    marker.position.fromArray(cam.position_m);
+    const marker = createCameraModel(cam.position_m, cam.look_at_m);
     cameraGroup.add(marker);
     cameraMarkers.set(cam.id, marker);
   }
+  cameraLabels = createCameraLabels(labelLayer, cameras);
 }
 
 // ---- track display objects ----
@@ -271,11 +269,13 @@ function setTrailPoints(trail, points) {
   trail.visible = count >= 2;
 }
 
-// Create the sphere, halo, trail, prediction line and label for a new track.
+// Create the bee, probation dot, halo, trail, prediction line and label for a new track.
+// The bee shows a confirmed track; the label, trail and prediction line carry the id colour.
 function createTrackView(id) {
   const color = trackColor(id);
-  const material = new THREE.MeshStandardMaterial({ color, transparent: true });
-  const sphere = new THREE.Mesh(sphereGeometry, material);
+  const bee = createBee(TRACK_BEE_LENGTH_M);
+  const dot = new THREE.Mesh(dotGeometry, new THREE.MeshStandardMaterial({
+    color, transparent: true, opacity: PROBATION_OPACITY }));
   const halo = new THREE.Mesh(haloGeometry, new THREE.MeshBasicMaterial({
     color, transparent: true, opacity: 0.25, depthWrite: false }));
   const trail = new THREE.Line(createTrailGeometry(), new THREE.LineBasicMaterial({ color }));
@@ -288,16 +288,18 @@ function createTrackView(id) {
   labelLayer.appendChild(label);
   trail.frustumCulled = false;
   predLine.frustumCulled = false;
-  scene.add(sphere, halo, trail, predLine, predMarker);
-  return { id, sphere, halo, trail, predLine, predMarker, label, points: [] };
+  scene.add(bee, dot, halo, trail, predLine, predMarker);
+  return { id, bee, dot, halo, trail, predLine, predMarker, label, points: [] };
 }
 
 // Remove a track's display objects and free their GPU resources.
 function removeTrackView(view) {
-  for (const o of [view.sphere, view.halo, view.trail, view.predLine, view.predMarker]) {
+  for (const o of [view.dot, view.halo, view.trail, view.predLine, view.predMarker]) {
     scene.remove(o);
     disposeObject(o, SHARED);
   }
+  // The bee shares its geometry and materials with all other bees: remove, do not dispose.
+  scene.remove(view.bee);
   view.label.remove();
 }
 
@@ -326,10 +328,12 @@ function updateTrail(view, pos, t) {
 function updateTrackView(view, track, t) {
   const pos = new THREE.Vector3().fromArray(track.pos);
   const selected = track.id === selectedId;
-  const scale = selected ? SELECTED_SCALE : (track.confirmed ? 1 : PROBATION_SCALE);
-  view.sphere.position.copy(pos);
-  view.sphere.scale.setScalar(scale);
-  view.sphere.material.opacity = track.confirmed ? 1 : PROBATION_OPACITY;
+  view.bee.visible = track.confirmed;
+  view.dot.visible = !track.confirmed;
+  view.dot.position.copy(pos);
+  poseBee(view.bee, track.pos, track.vel, track.state === "flying",
+          wingPhase(track.id, performance.now()));
+  view.bee.scale.setScalar(selected ? SELECTED_SCALE : 1);
   view.halo.position.copy(pos);
   view.halo.visible = selected;
   view.label.style.display = track.confirmed ? "" : "none";
@@ -377,7 +381,7 @@ function toScreen(pos) {
 // Move each confirmed track's text label to its projected position.
 function positionLabels() {
   for (const view of trackViews.values()) {
-    const p = toScreen(view.sphere.position);
+    const p = toScreen(view.bee.position);
     if (!p || view.label.style.display === "none") { view.label.style.visibility = "hidden"; continue; }
     view.label.style.visibility = "visible";
     view.label.style.transform = `translate(${p.x + 8}px, ${p.y - 16}px)`;
@@ -400,7 +404,7 @@ function pickTrack(clientX, clientY) {
   const px = clientX - rect.left, py = clientY - rect.top;
   let best = null, bestDist = PICK_RADIUS_PX;
   for (const view of trackViews.values()) {
-    const p = toScreen(view.sphere.position);
+    const p = toScreen(view.bee.position);
     if (!p) continue;
     const d = Math.hypot(p.x - px, p.y - py);
     if (d <= bestDist) { best = view.id; bestDist = d; }
@@ -527,10 +531,10 @@ function updateCorrections(corrections) {
   }));
 }
 
-// Colour camera markers red for cameras of silent nodes.
+// Show a red LED on the cameras of silent nodes, a green one on the others.
 function updateCameraMarkers() {
   for (const [camId, marker] of cameraMarkers) {
-    marker.material = silentNodes.has(cameraNode.get(camId)) ? cameraSilentMaterial : cameraOkMaterial;
+    setCameraRunning(marker, !silentNodes.has(cameraNode.get(camId)));
   }
 }
 
@@ -625,6 +629,8 @@ function handleScene(msg) {
 function handleTracks(msg) {
   lastTracks = msg;
   selectedId = msg.selected;
+  // The camera panels are redrawn in the next animation frame after every tracks message.
+  camerasDirty = true;
   updateTracks(msg);
   updateStatus(msg);
   updateSelected(msg);
@@ -632,7 +638,6 @@ function handleTracks(msg) {
   updateHealth(msg);
   updateCameraMarkers();
   updateRobot(msg.robot);
-  camerasDirty = true;
 }
 
 // Open the connection and reconnect after a close.
@@ -671,6 +676,8 @@ function animate() {
   controls.update();
   renderer.render(scene, camera);
   positionLabels();
+  // Camera id labels are repositioned only while they are switched on.
+  if ($("show-camera-ids").checked) placeCameraLabels(cameraLabels, true, camera, canvas);
   if (camerasDirty) { camerasDirty = false; drawCameraPanels(); }
 }
 
@@ -685,6 +692,10 @@ $("show-trails").addEventListener("change", () => {
   for (const view of trackViews.values()) { view.points = []; view.trail.visible = false; }
 });
 $("show-robot").addEventListener("change", () => updateRobot(lastTracks && lastTracks.robot));
+// One last placement after switching off hides the labels.
+$("show-camera-ids").addEventListener("change", () => {
+  placeCameraLabels(cameraLabels, $("show-camera-ids").checked, camera, canvas);
+});
 $("strip-toggle").addEventListener("click", () => {
   document.body.classList.toggle("strip-collapsed");
   resize();

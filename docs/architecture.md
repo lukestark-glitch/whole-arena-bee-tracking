@@ -227,7 +227,7 @@ Simulator → page, at most 30 times per second of wall time (also while paused)
               "tilt_max_acceleration_rad_s2": 200.0},
  "robot": {"rail_m": 0.392, "tilt_rad": 0.11, "focus_m": 0.215, "has_target": true},
  "stopped_nodes": ["node-03"],
- "bees": [{"id": 0, "pos": [0.41, 0.15, 0.17], "state": "flying"}]}
+ "bees": [{"id": 0, "pos": [0.41, 0.15, 0.17], "vel": [0.8, -0.1, 0.0], "state": "flying"}]}
 ```
 
 Page → simulator, one message per change:
