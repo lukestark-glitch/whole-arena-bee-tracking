@@ -167,6 +167,65 @@ _TRACKER_INT_FIELDS = ("min_cameras", "min_cameras_tracked", "confirm_frames", "
 
 
 @dataclass(frozen=True)
+class Marker:
+    """A wall marker with a known position.
+
+    Attributes:
+        id: Marker number, unique.
+        position_m: Position in the arena frame (m).
+    """
+
+    id: int
+    position_m: tuple[float, float, float]
+
+
+@dataclass(frozen=True)
+class CalibrationSettings:
+    """The wand run, the wall markers and the deliberate errors of the simulation.
+
+    Attributes:
+        camera_error_position_m: Distance of each true camera from its nominal position
+            when the simulator runs miscalibrated (m).
+        camera_error_angle_rad: Rotation of each true camera against its nominal
+            orientation when the simulator runs miscalibrated (rad).
+        robot_error_m: Shift of the true rail start against the robot file when the
+            simulator runs miscalibrated, arena frame (m).
+        reference_points_m: Three known points the wand rests on first, arena frame (m).
+        reference_dwell_s: Rest on each reference point (s).
+        sweep_duration_s: Duration of the sweep through the arena (s).
+        sweep_margin_m: Distance the sweep keeps from the walls (m).
+        sweep_frame_step: The camera solver uses every n-th frame of the sweep.
+        stop_count: Number of stop points for the robot calibration.
+        stop_dwell_s: Rest on each stop point (s).
+        marker_rate_hz: How often the cameras report the wall markers (Hz).
+        marker_threshold_px: Mean marker error above which a camera counts as displaced (px).
+        min_markers: Markers a camera must see to be checked and corrected.
+        markers: The wall markers.
+    """
+
+    camera_error_position_m: float
+    camera_error_angle_rad: float
+    robot_error_m: tuple[float, float, float]
+    reference_points_m: tuple[tuple[float, float, float], ...]
+    reference_dwell_s: float
+    sweep_duration_s: float
+    sweep_margin_m: float
+    sweep_frame_step: int
+    stop_count: int
+    stop_dwell_s: float
+    marker_rate_hz: float
+    marker_threshold_px: float
+    min_markers: int
+    markers: tuple[Marker, ...]
+
+
+# Known points needed to estimate the six pose values of one camera.
+MIN_MARKERS_FOR_POSE = 4
+# Reference points needed to fix position, orientation and scale of the arena frame.
+REFERENCE_POINT_COUNT = 3
+
+
+@dataclass(frozen=True)
 class Ports:
     """Port numbers: one UDP port per message stream, one TCP port per browser window."""
 
@@ -190,6 +249,7 @@ class Config:
     noise: Noise
     bees: Bees
     tracker: TrackerSettings
+    calibration: CalibrationSettings
     ports: Ports
 
 
@@ -593,6 +653,56 @@ def _parse_tracker(raw: Any) -> TrackerSettings:
     return TrackerSettings(**{**values, **whole})
 
 
+def _parse_calibration(raw: Any) -> CalibrationSettings:
+    """Build CalibrationSettings from the ``calibration`` section.
+
+    Args:
+        raw: Parsed YAML mapping.
+
+    Returns:
+        The calibration settings (metres, seconds, radians, pixels).
+
+    Raises:
+        ConfigError: If a key is missing, there are not exactly three reference points, a
+            count or rate is not positive, `min_markers` is below 4, or two markers share
+            an id.
+    """
+    section = "calibration"
+    names = (
+        "camera_error_position_m", "camera_error_angle_rad", "reference_dwell_s",
+        "sweep_duration_s", "sweep_margin_m", "stop_dwell_s", "marker_rate_hz",
+        "marker_threshold_px",
+    )
+    numbers = dict(zip(names, _floats(raw, names, section)))
+    whole = {
+        name: int(_require(raw, name, section))
+        for name in ("sweep_frame_step", "stop_count", "min_markers")
+    }
+    references = tuple(
+        _vec3(point, "calibration reference point")
+        for point in _require(raw, "reference_points_m", section)
+    )
+    markers = tuple(
+        Marker(int(_require(m, "id", "marker")), _vec3(_require(m, "position_m", "marker"), "marker"))
+        for m in _require(raw, "markers", section)
+    )
+    if len(references) != REFERENCE_POINT_COUNT:
+        raise ConfigError(f"calibration needs exactly {REFERENCE_POINT_COUNT} reference points")
+    if min(whole.values()) < 1 or numbers["marker_rate_hz"] <= 0.0:
+        raise ConfigError("calibration counts, the frame step and marker_rate_hz must be above 0")
+    if whole["min_markers"] < MIN_MARKERS_FOR_POSE:
+        raise ConfigError(f"calibration min_markers must be at least {MIN_MARKERS_FOR_POSE}")
+    if len({marker.id for marker in markers}) != len(markers):
+        raise ConfigError("calibration marker ids must be unique")
+    return CalibrationSettings(
+        robot_error_m=_vec3(_require(raw, "robot_error_m", section), "robot_error_m"),
+        reference_points_m=references,
+        markers=markers,
+        **numbers,
+        **whole,
+    )
+
+
 def _parse_ports(raw: Any) -> Ports:
     """Build Ports from the ``ports`` section.
 
@@ -638,6 +748,7 @@ def _parse(raw: Any) -> Config:
         noise=_parse_noise(_require(raw, "noise", "top level")),
         bees=_parse_bees(_require(raw, "bees", "top level")),
         tracker=_parse_tracker(_require(raw, "tracker", "top level")),
+        calibration=_parse_calibration(_require(raw, "calibration", "top level")),
         ports=_parse_ports(_require(raw, "ports", "top level")),
     )
 

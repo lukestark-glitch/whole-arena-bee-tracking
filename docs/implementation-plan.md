@@ -11,7 +11,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 3 | Tracking core | done |
 | 4 | Control window | done |
 | 5 | Robot | done |
-| 6 | Calibration | not started |
+| 6 | Calibration | done |
 | 7 | Experiments and other arena shapes | not started |
 | 8 | Optional: rendered camera images and a real detector | not planned yet |
 
@@ -226,8 +226,8 @@ measured against the truth.
 
 **Stage 5 follow-ups**
 
-- The robot in the control window still uses the old simple model (boxes). Reuse the robot
-  model of the simulator window there (rail bars, carriage with yoke, camera body, lens).
+- Done: the control window draws the robot with the same model as the simulator window
+  (rail bars, carriage with yoke, camera body, lens).
 
 ---
 
