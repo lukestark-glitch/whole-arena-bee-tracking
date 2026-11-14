@@ -226,8 +226,8 @@ measured against the truth.
 
 **Stage 5 follow-ups**
 
-- The robot in the control window still uses the old simple model (boxes). Reuse the robot
-  model of the simulator window there (rail bars, carriage with yoke, camera body, lens).
+- Done: the control window draws the robot with the same model as the simulator window
+  (rail bars, carriage with yoke, camera body, lens).
 
 ---
 
