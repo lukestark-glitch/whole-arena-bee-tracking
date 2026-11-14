@@ -42,8 +42,9 @@ RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
 MAX_DATAGRAM_BYTES = 65535
 # Two rays are needed to triangulate the wand.
 MIN_CAMERAS = 2
-# The robot needs the first part of a stop to arrive; only the second half is used.
-SETTLED_SHARE = 0.5
+# The robot needs up to half a second to arrive at a stop (rail limits of the robot file);
+# only the last part of each stop is used.
+SETTLED_SHARE = 0.7
 MM_PER_M = 1000.0
 
 
@@ -290,7 +291,10 @@ def load_calibration(path: Path) -> Calibration:
     try:
         content = json.loads(path.read_text(encoding="utf-8"))
         cameras = {
-            camera_id: CameraPose(np.array(entry["position_m"]), np.array(entry["rotation"]))
+            camera_id: CameraPose(
+                np.array(entry["position_m"], dtype=float).reshape(3),
+                np.array(entry["rotation"], dtype=float).reshape(3, 3),
+            )
             for camera_id, entry in content["cameras"].items()
         }
         robot = content["robot"]
@@ -300,7 +304,7 @@ def load_calibration(path: Path) -> Calibration:
             float(robot["lens_offset_m"]),
             float(robot["focus_scale"]),
         )
-    except (KeyError, TypeError, AttributeError) as error:
+    except (KeyError, TypeError, AttributeError, ValueError) as error:
         raise ValueError(f"{path} is not a calibration file: {error!r}") from error
 
 
@@ -370,12 +374,18 @@ def collect_run(config: Config) -> tuple[list[Frame], list[RobotPose]]:
 
     Returns:
         All frames up to the last frame of the run, and all `robot_pose` messages.
+
+    The run is over when its last frame has come out of the assembler. If that frame
+    stays incomplete (a lost datagram), a `robot_pose` from the end of the run ends the
+    listening instead, once no further datagram is waiting.
     """
     period_s = 1.0 / frame_rate_hz(config)
     assembler = FrameAssembler(
         [camera.id for camera in config.cameras], config.tracker.frame_timeout_frames * period_s
     )
-    last_frame = last_frame_of(config, wand_duration_s(config.calibration))
+    duration_s = wand_duration_s(config.calibration)
+    last_frame = last_frame_of(config, duration_s)
+    robot_done = False
     frames: list[Frame] = []
     poses: list[RobotPose] = []
     with (
@@ -386,12 +396,17 @@ def collect_run(config: Config) -> tuple[list[Frame], list[RobotPose]]:
         selector.register(detections, selectors.EVENT_READ)
         selector.register(robot_poses, selectors.EVENT_READ)
         while not frames or frames[-1].frame < last_frame:
-            for key, _ in selector.select():
+            # After the robot's last pose only what is already waiting is still read.
+            events = selector.select(timeout=0 if robot_done else None)
+            if robot_done and not events:
+                break
+            for key, _ in events:
                 datagram = key.fileobj.recv(MAX_DATAGRAM_BYTES)
                 if key.fileobj is detections:
                     frames.extend(frames_from_datagram(assembler, datagram))
                 elif (pose := _robot_pose(datagram)) is not None:
                     poses.append(pose)
+                    robot_done = robot_done or pose.t >= duration_s - period_s
     return frames, poses
 
 

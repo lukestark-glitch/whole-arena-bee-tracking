@@ -25,7 +25,7 @@ from tracker.triangulate import TrackingCamera, closest_point_to_rays
 POSE_PARAMS = 6  # 3 position offsets + 3 rotation-vector components per camera
 POINT_PARAMS = 3  # x, y, z per unknown wand frame
 MIN_OBSERVATIONS_PER_FRAME = 2  # two rays are needed to triangulate a point
-MIN_KNOWN_FRAMES = 3  # three reference points fix position, orientation and scale
+MIN_KNOWN_FRAMES = 3  # three different reference points fix position, orientation and scale
 MIN_MARKERS = 4  # fewer known points leave the six pose values under-determined
 MAX_EVALUATIONS = 100  # noisy data never reaches the tight tolerances; stop after convergence stalls
 SOLVER_TOLERANCE = 1e-12  # tight, so the result is limited by the data and not the solver
@@ -90,12 +90,13 @@ def _validate(cameras: list[TrackingCamera], data: WandData) -> np.ndarray:
         (K,) bool, True for frames whose point is unknown.
 
     Raises:
-        ValueError: If fewer than 3 frames are known, a camera has no
-            observation, or an unknown frame has fewer than 2 observations.
+        ValueError: If fewer than 3 different reference points are known, a camera has
+            no observation, or an unknown frame has fewer than 2 observations.
     """
     unknown = np.isnan(data.known_points_m).any(axis=1)
-    if int((~unknown).sum()) < MIN_KNOWN_FRAMES:
-        raise ValueError(f"need at least {MIN_KNOWN_FRAMES} known reference frames")
+    # Many frames of the same point count once: two points leave a rotation open.
+    if len(np.unique(data.known_points_m[~unknown], axis=0)) < MIN_KNOWN_FRAMES:
+        raise ValueError(f"need at least {MIN_KNOWN_FRAMES} different known reference points")
     seen = np.bincount(data.camera_index, minlength=len(cameras))
     for i in np.flatnonzero(seen == 0):
         raise ValueError(f"camera {cameras[i].id} has no observations")
