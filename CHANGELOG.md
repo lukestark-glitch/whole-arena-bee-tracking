@@ -3,6 +3,18 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-14: Stage 5 polish
+
+- Softer 3D models for bee (bands, fur colours, flapping wings, heading from velocity),
+  robot (belt rail, carriage, NEMA 23 motors with gearboxes, camera, lens, stereo pair),
+  arena (base plate, glass walls, frame) and tracking cameras. Both windows share them
+  (`shared/web/models.js`); the control window now shows the same robot model.
+- Shared style sheet and card layout for both windows.
+- Control window: "Show trails" switch.
+- `config/robot.yaml`: rail 3 m/s and 15 m/s², tilt 12 rad/s and 90 rad/s². The robot
+  result below was not re-measured.
+- Decisions D70 to D74.
+
 ## 2026-11-14: Stage 6, calibration
 
 - Simulator: `--miscalibrated` (true cameras and robot differ from the config files),

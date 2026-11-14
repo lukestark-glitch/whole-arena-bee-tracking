@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from websockets.asyncio.client import ClientConnection, connect
 
+import shared.web as web
 import simulator.main as main
 from shared.config import load_config, load_robot
 from shared.protocol import UDP_HOST
@@ -79,11 +80,11 @@ def _running() -> Iterator[int]:
         assert not thread.is_alive()
 
 
-def _get(port: int) -> tuple[int, bytes]:
-    """HTTP GET of the root path, retrying until the server is up."""
+def _get(port: int, path: str = "/") -> tuple[int, bytes]:
+    """HTTP GET of a path (default the page), retrying until the server is up."""
     for _ in range(CONNECT_ATTEMPTS):
         try:
-            with urllib.request.urlopen(f"http://{UDP_HOST}:{port}/", timeout=TIMEOUT_S) as r:
+            with urllib.request.urlopen(f"http://{UDP_HOST}:{port}{path}", timeout=TIMEOUT_S) as r:
                 return r.status, r.read()
         except urllib.error.HTTPError as error:
             return error.code, error.read()
@@ -212,6 +213,15 @@ def test_http_page(page_exists: bool, tmp_path: Path, monkeypatch: pytest.Monkey
         status, body = _get(port)
     assert status == (200 if page_exists else 404)
     assert (body == page.read_bytes()) if page_exists else body
+
+
+@pytest.mark.parametrize("path", ["/models.js", "/style.css"])
+def test_http_shared_files(path: str) -> None:
+    """The files both windows share are served next to the page."""
+    with _running() as port:
+        status, body = _get(port, path)
+    assert status == 200
+    assert body == web.SHARED_FILES[path][0].read_bytes()
 
 
 def test_cinema_images_are_relayed_to_viewers() -> None:

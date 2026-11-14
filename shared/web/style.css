@@ -1,0 +1,49 @@
+/* Style shared by the simulator window and the control window: colours, panel, cards,
+   buttons, sliders and switches. Page-specific layout stays in each page. No blur or shadow
+   effects over the 3D view: they cost frame rate on older computers. */
+:root {
+  --bg: #f6f1e6; --panel: #fbf8f1; --card: #ffffff; --text: #2a2620; --muted: #7b7468;
+  --border: #e6dfd0; --accent: #b45309; --accent-soft: #fcebd0; --canvas: #efe8d8;
+  --ok: #15803d; --bad: #b91c1c; --row-sel: #fcebd0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16140f; --panel: #1d1a14; --card: #26221b; --text: #ece6d8; --muted: #a39b8a;
+    --border: #38332a; --accent: #f59e0b; --accent-soft: #4a3510; --canvas: #1c1913;
+    --ok: #4ade80; --bad: #f87171; --row-sel: #4a3510;
+  }
+}
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+#panel { position: fixed; left: 0; top: 0; bottom: 0; box-sizing: border-box; padding: 14px 12px;
+  overflow-y: auto; background: var(--panel); border-right: 1px solid var(--border); }
+h1 { font-size: 17px; margin: 0 0 10px 4px; letter-spacing: -.01em; }
+h1::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px;
+  border-radius: 50%; background: var(--accent); }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  margin: 0 0 6px; font-weight: 600; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin: 0 0 10px; }
+.row { margin: 8px 0; }
+.row label { display: flex; justify-content: space-between; align-items: center; }
+.row .val, .empty { color: var(--muted); }
+.row .val { font-variant-numeric: tabular-nums; }
+.inline { display: flex; gap: 8px; align-items: center; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+td { padding: 1px 0; }
+td:first-child { color: var(--muted); }
+td:last-child { text-align: right; }
+button { padding: 5px 12px; background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+  cursor: pointer; font: inherit; font-weight: 600; }
+button:hover { filter: brightness(1.08); }
+button:active { transform: translateY(1px); }
+.dark-btn, #nodes button { background: var(--muted); }
+input[type=number] { width: 70px; padding: 3px 6px; background: transparent; color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+input[type=range] { width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0 8px 0 0;
+  vertical-align: -3px; }
+.switch { display: block; margin: 5px 0; cursor: pointer; }
+.status-ok { color: var(--ok); font-weight: 600; }
+.status-bad { color: var(--bad); font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
