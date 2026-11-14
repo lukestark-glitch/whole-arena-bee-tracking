@@ -156,6 +156,7 @@ class Simulation:
         stopped_nodes: Ids of camera nodes that send nothing (as if their computer failed).
         controller: The emulated robot; `controller.robot` holds its current limits.
         robot_rng: Random generator of the robot's stereo camera, spawned from `rng`.
+        marker_rng: Random generator of the marker pixel noise, spawned from `rng`.
         control_steps: Robot control steps done since frame 0.
         exposures: Stereo exposures done since frame 0.
         miscalibrated: True cameras and robot differ from the config files.
@@ -173,6 +174,7 @@ class Simulation:
     time_scale: float
     controller: Controller
     robot_rng: np.random.Generator
+    marker_rng: np.random.Generator
     control_steps: int = 0
     exposures: int = 0
     miscalibrated: bool = False
@@ -245,10 +247,10 @@ def create_simulation(
         A running (not paused) simulation with `config.bees.count` bees, or with the wand.
     """
     rng = np.random.default_rng(seed)
-    # The robot's draws depend on when `target` arrives over UDP, and the camera errors
-    # must not depend on the number of bees. Generators of their own, spawned from the one
-    # seed, keep both from shifting the bees and the cameras.
-    robot_rng, setup_rng = rng.spawn(2)
+    # The robot's draws depend on when `target` arrives over UDP, and neither the camera
+    # errors nor the marker noise should change the bees. Generators of their own, spawned
+    # from the one seed, keep the bees and their detections as they were before.
+    robot_rng, setup_rng, marker_rng = rng.spawn(3)
     poses = _true_poses(config, miscalibrated, setup_rng)
     if wand:
         start_m = wand_position(config.calibration, config.arena, 0.0)
@@ -258,7 +260,7 @@ def create_simulation(
     controller = create_controller(_true_robot(config, robot, miscalibrated))
     return Simulation(
         config, seed, rng, poses, bees, 0, len(bees), False, time_scale,
-        controller, robot_rng, miscalibrated=miscalibrated, wand=wand,
+        controller, robot_rng, marker_rng, miscalibrated=miscalibrated, wand=wand,
     )
 
 
@@ -266,7 +268,7 @@ def _observe_markers(simulation: Simulation) -> dict[str, tuple[tuple[int, float
     """Let every camera report the wall markers when a marker report is due.
 
     Args:
-        simulation: Simulation; its random generator is used for the pixel noise.
+        simulation: Simulation; its marker generator is used for the pixel noise.
 
     Returns:
         Camera id to (marker_id, u_px, v_px); empty in frames without a marker report.
@@ -282,7 +284,7 @@ def _observe_markers(simulation: Simulation) -> dict[str, tuple[tuple[int, float
             config.camera_models[c.model],
             settings.markers,
             config.noise.pixel_sigma_px,
-            simulation.rng,
+            simulation.marker_rng,
         )
         for c in config.cameras
     }
@@ -607,6 +609,7 @@ def _restart(simulation: Simulation, value: object) -> None:
     simulation.next_bee_id = fresh.next_bee_id
     simulation.controller = fresh.controller
     simulation.robot_rng = fresh.robot_rng
+    simulation.marker_rng = fresh.marker_rng
     simulation.control_steps = fresh.control_steps
     simulation.exposures = fresh.exposures
 

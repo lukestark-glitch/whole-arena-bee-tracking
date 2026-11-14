@@ -3,6 +3,33 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-14: Stage 6, calibration
+
+- Simulator: `--miscalibrated` (true cameras and robot differ from the config files),
+  `--wand` (calibration wand run), wall markers in `detections`, control to displace a camera.
+- `tracker/calibrate.py`: bundle adjustment of all camera poses from the wand with three
+  reference points; pose of one camera from the wall markers.
+- `tracker/robot_calibration.py`: rail start, lens offset and focus scale from 15 wand stops.
+- `tracker/wand_run.py`: command that collects a wand run and writes `logs/calibration.json`;
+  the tracker loads it with `--calibration`.
+- Marker check in the tracker: a displaced camera is reported in the control window and
+  corrected.
+- Control window: robot drawn with the simulator's model (Stage 5 follow-up).
+- Config: new `calibration` section (decisions D60 to D69).
+
+**Calibration result** (seed 1, default configuration, cameras off by 1 cm and 2°, 0.5 px noise):
+
+| Measure | Value |
+| --- | --- |
+| Camera position after calibration, worst camera | 0.13 mm |
+| Camera orientation after calibration, worst camera | 0.02° |
+| Robot rail start | within 0.3 mm |
+| Mean position error, 60 s, 10 bees, own calibration | 0.45 mm (baseline 0.44 mm) |
+| 95th percentile position error | 1.12 mm (baseline 1.11 mm) |
+
+The 60 s run used three programs over UDP; the camera numbers are from the same wand run
+in one process, where the true poses can be compared.
+
 ## 2026-11-14: Stage 5, robot
 
 - `config/robot.yaml`: every robot value with unit and source; `--robot PATH` selects

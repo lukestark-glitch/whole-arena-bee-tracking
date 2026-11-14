@@ -20,8 +20,8 @@ The full concept is in the [concept paper](docs/concept-paper.md), also availabl
 ## Status
 
 Early proof of concept. No hardware exists. Configuration, message formats, the
-simulator, the tracker with their windows and the emulated camera robot are built
-(Stages 0 to 5). Calibration is next. First baseline: 0.44 mm mean position error with 10 simulated bees
+simulator, the tracker with their windows, the emulated camera robot and the
+self-calibration are built (Stages 0 to 6). Experiments are next. First baseline: 0.44 mm mean position error with 10 simulated bees
 (see [`CHANGELOG.md`](CHANGELOG.md)). The plan is to build the
 tracking software and test it against a simulator that behaves like the hardware would.
 Progress is tracked in [`docs/implementation-plan.md`](docs/implementation-plan.md).
