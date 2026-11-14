@@ -33,11 +33,14 @@ class Frame:
         t_s: Exposure time in simulation seconds.
         detections: Camera id to (u_px, v_px, size_px) entries. Only cameras that
             reported are present.
+        markers: Camera id to (marker_id, u_px, v_px) entries. Only cameras that
+            reported wall markers in this frame are present.
     """
 
     frame: int
     t_s: float
     detections: dict[str, tuple[tuple[float, float, float], ...]]
+    markers: dict[str, tuple[tuple[int, float, float], ...]] = field(default_factory=dict)
 
 
 @dataclass
@@ -46,6 +49,7 @@ class _Pending:
 
     t_s: float
     detections: dict[str, tuple[tuple[float, float, float], ...]] = field(default_factory=dict)
+    markers: dict[str, tuple[tuple[int, float, float], ...]] = field(default_factory=dict)
 
 
 class FrameAssembler:
@@ -86,6 +90,9 @@ class FrameAssembler:
         # Parts of a large message share camera and frame; join them in arrival order.
         previous = pending.detections.get(message.camera_id, ())
         pending.detections[message.camera_id] = previous + message.bees
+        if message.markers:
+            seen = pending.markers.get(message.camera_id, ())
+            pending.markers[message.camera_id] = seen + message.markers
         return self._release_ready(message.t)
 
     def last_report_s(self) -> dict[str, float]:
@@ -120,7 +127,12 @@ class FrameAssembler:
                 newest_ready = max(newest_ready, number)
         # Releasing in order means a ready frame also flushes all older ones.
         released = [
-            Frame(number, self._pending[number].t_s, self._pending[number].detections)
+            Frame(
+                number,
+                self._pending[number].t_s,
+                self._pending[number].detections,
+                self._pending[number].markers,
+            )
             for number in sorted(self._pending)
             if number <= newest_ready
         ]
