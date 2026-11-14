@@ -30,6 +30,7 @@ class Outgoing:
 def node_messages(
     node: Node,
     bees_by_camera: dict[str, tuple[tuple[float, float, float], ...]],
+    markers_by_camera: dict[str, tuple[tuple[int, float, float], ...]],
     frame: int,
     t_s: float,
     noise: Noise,
@@ -41,6 +42,8 @@ def node_messages(
     Args:
         node: The node and its camera ids.
         bees_by_camera: Detections (u_px, v_px, size_px) per camera id.
+        markers_by_camera: Wall markers (marker_id, u_px, v_px) per camera id; a camera
+            that reports no markers in this frame is absent.
         frame: Frame number.
         t_s: Simulation time of the frame (s).
         noise: Noise settings (node delay and jitter in s).
@@ -60,6 +63,7 @@ def node_messages(
             frame=frame,
             t=t_s,
             bees=bees_by_camera[camera_id],
+            markers=markers_by_camera.get(camera_id, ()),
         )
         outgoing.extend(
             Outgoing(t_s + delay_s, port, datagram) for datagram in encode_detections(message)
