@@ -3,6 +3,19 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-14: Stage 5 polish 2
+
+- Fixed: robot and tracking cameras were missing in both windows. Parts with and without an
+  index cannot be merged in three.js; the merge returned nothing and the scene handler
+  stopped. All parts are now made non-indexed first (D75).
+- Fixed: the simulator window drew one bee with still wings, and no robot or cinema view.
+  The `state` message had no bee velocity, so the page stopped at the first bee (D76).
+- Fixed: the camera panels of the control window did not update. The missing robot model
+  stopped the handler of every `tracks` message before the panels were marked for redrawing.
+- Control window: confirmed tracks are drawn as bees with flying or folded wings (D77).
+- Both windows: tracking cameras as Raspberry Pi camera modules with a status LED (D78), a
+  "Show camera IDs" switch (D79), scroll bars in the style of the panels.
+
 ## 2026-11-14: Stage 5 polish
 
 - Softer 3D models for bee (bands, fur colours, flapping wings, heading from velocity),

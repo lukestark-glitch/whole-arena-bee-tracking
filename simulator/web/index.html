@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/style.css">
 <style>
   #view { position: fixed; left: 290px; top: 0; width: calc(100% - 290px); height: 100%; display: block; }
+  #labels { position: fixed; left: 290px; top: 0; width: calc(100% - 290px); height: 100%; }
   #panel { width: 290px; }
   .nodes button { margin: 0 6px 6px 0; }
   .nodes button.stopped { background: var(--bad); }
@@ -14,6 +15,7 @@
 </head>
 <body>
 <canvas id="view"></canvas>
+<div id="labels"></div>
 <div id="panel">
   <h1>Simulator window</h1>
   <div class="card">Server <span id="status" class="status-bad" style="float:right">disconnected</span></div>
@@ -99,6 +101,7 @@
   <div class="card">
   <h2>Display</h2>
   <label class="switch"><input type="checkbox" id="show_cones" checked>Show view cones</label>
+  <label class="switch"><input type="checkbox" id="show_camera_ids">Show camera IDs</label>
   </div>
 </div>
 
@@ -112,7 +115,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { createBee, poseBee, wingPhase, buildRobotModel, poseRobotModel, buildArenaModel,
-         createCameraGeometry } from "/models.js";
+         createCameraModel, setCameraRunning, createCameraLabels, placeCameraLabels } from "/models.js";
 
 // ---- constants ----
 const RECONNECT_DELAY_MS = 1000;
@@ -153,7 +156,7 @@ scene.add(robotGroup);
 let robotInfo = null;          // robot geometry from the scene message
 let robotModel = null;         // parts of the robot model that move
 let bodyLengthM = 0.015;       // bee body length from the scene message
-let cameraGeometry = null;     // body of the tracking cameras, shared
+let cameraLabels = [];         // id labels of the tracking cameras
 
 const beeMeshes = new Map();   // bee id -> bee model
 
@@ -195,10 +198,9 @@ function buildArena(size) {
   arenaGroup.add(buildArenaModel(size));
 }
 
-// Build a marker plus a translucent view cone for one camera.
+// Build the camera model plus a translucent view cone for one camera.
 function buildCamera(cam) {
-  const group = new THREE.Group();
-  group.position.fromArray(cam.position_m);
+  const group = createCameraModel(cam.position_m, cam.look_at_m);
   group.name = cam.id;
 
   const halfAngle = cam.fov_horizontal_rad / 2;
@@ -207,18 +209,23 @@ function buildCamera(cam) {
     new THREE.MeshBasicMaterial({ color: CAMERA_COLOR, transparent: true, opacity: CONE_OPACITY,
                                   side: THREE.DoubleSide, depthWrite: false }));
   cone.name = "cone";
-  // ConeGeometry has its apex at +y; move the apex to the origin and point +y along the view axis.
+  // ConeGeometry has its apex at +y; move the apex to the origin and open it along +y, the
+  // view axis of the camera model.
   cone.geometry.translate(0, -CONE_LENGTH_M / 2, 0);
   cone.geometry.rotateX(Math.PI);
-  const axis = new THREE.Vector3().fromArray(cam.look_at_m).sub(group.position).normalize();
-  cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
-  const body = new THREE.Mesh(cameraGeometry, new THREE.MeshStandardMaterial({
-    color: CAMERA_COLOR, vertexColors: true, roughness: 0.6 }));
-  body.quaternion.copy(cone.quaternion);
-  group.add(body);
   cone.visible = document.getElementById("show_cones").checked;
   group.add(cone);
   cameraGroup.add(group);
+}
+
+// Remove all cameras. Only the cones are disposed: the camera models share their geometry.
+function clearCameras() {
+  for (const group of [...cameraGroup.children]) {
+    cameraGroup.remove(group);
+    const cone = group.getObjectByName("cone");
+    cone.geometry.dispose();
+    cone.material.dispose();
+  }
 }
 
 // Build the robot model (rail, carriage with yoke and motors, tilting head).
@@ -284,7 +291,6 @@ function sendCinema() {
 // Rebuild arena and cameras from a scene message.
 function handleScene(msg) {
   arenaSize = msg.arena_size_m;
-  cameraGeometry = createCameraGeometry();
   if (msg.robot) {
     robotInfo = msg.robot;
     bodyLengthM = msg.body_length_m;
@@ -293,8 +299,9 @@ function handleScene(msg) {
     view.height = Math.round(view.width / robotInfo.cinema_aspect_ratio);
   }
   buildArena(arenaSize);
-  clearGroup(cameraGroup);
+  clearCameras();
   msg.cameras.forEach(buildCamera);
+  cameraLabels = createCameraLabels($("labels"), msg.cameras);
   $("displace_camera").replaceChildren(...msg.cameras.map(cam => new Option(cam.id, cam.id)));
   nodeCameras = msg.nodes || [];
   buildNodeButtons(nodeCameras);
@@ -316,7 +323,7 @@ function buildNodeButtons(nodes) {
   }
 }
 
-// Show running / STOPPED on the buttons and colour the cameras of stopped nodes red.
+// Show running / STOPPED on the buttons; cameras of stopped nodes get a red LED and cone.
 function updateNodes(stoppedIds) {
   for (const node of nodeCameras) {
     const stopped = stoppedIds.includes(node.id);
@@ -325,9 +332,10 @@ function updateNodes(stoppedIds) {
     button.classList.toggle("stopped", stopped);
     for (const cameraId of node.cameras) {
       const group = cameraGroup.getObjectByName(cameraId);
-      if (group) group.traverse(o => {
-        if (o.material) o.material.color.setHex(stopped ? STOPPED_CAMERA_COLOR : CAMERA_COLOR);
-      });
+      if (!group) continue;
+      setCameraRunning(group, !stopped);
+      group.getObjectByName("cone").material.color.setHex(
+        stopped ? STOPPED_CAMERA_COLOR : CAMERA_COLOR);
     }
   }
 }
@@ -476,6 +484,10 @@ function wireControls() {
     sendControl("camera_displaced",
       { camera_id: $("displace_camera").value, angle_rad: degrees * Math.PI / 180 });
   });
+  // One last placement after switching off hides the labels.
+  $("show_camera_ids").addEventListener("change", () => {
+    placeCameraLabels(cameraLabels, $("show_camera_ids").checked, camera, canvas);
+  });
   $("show_cones").addEventListener("change", () => {
     const on = $("show_cones").checked;
     cameraGroup.traverse(o => { if (o.name === "cone") o.visible = on; });
@@ -487,6 +499,8 @@ function animate() {
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
+  // Labels are repositioned only while they are switched on.
+  if ($("show_camera_ids").checked) placeCameraLabels(cameraLabels, true, camera, canvas);
 }
 
 // Match the scene background to the colour scheme.

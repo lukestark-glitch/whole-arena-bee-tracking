@@ -1,5 +1,5 @@
-// 3D models shared by the simulator window and the control window: bee, robot, arena and a
-// camera body. Display only; sizes are not measured, except where a comment says so.
+// 3D models shared by the simulator window and the control window: bee, robot, arena and
+// the tracking cameras with their id labels. Display only; sizes are not measured, except where a comment says so.
 // Soft, matte, rounded shapes. Each model is merged into a few meshes per material and its
 // geometry is shared, so a window with dozens of bees still needs only a few draw calls.
 //
@@ -9,6 +9,17 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
 // ---- shared helpers ----
+
+// Merge geometries into one. three.js can only merge geometries that are all indexed or all
+// non-indexed (rounded boxes are non-indexed, boxes, spheres and cylinders are indexed), so
+// every part is made non-indexed first. The parts are disposed.
+function mergeParts(geometries) {
+  const flat = geometries.map(g => (g.index ? g.toNonIndexed() : g));
+  const merged = mergeGeometries(flat);
+  new Set([...geometries, ...flat]).forEach(g => g.dispose());
+  if (!merged) throw new Error("models.js: parts with different attributes cannot be merged");
+  return merged;
+}
 
 // Collects geometries by material key, then merges each key into one mesh.
 class PartList {
@@ -28,8 +39,7 @@ class PartList {
   toGroup(materials) {
     const group = new THREE.Group();
     for (const [key, geometries] of this.byKey) {
-      group.add(new THREE.Mesh(mergeGeometries(geometries), materials[key]));
-      geometries.forEach(g => g.dispose());
+      group.add(new THREE.Mesh(mergeParts(geometries), materials[key]));
     }
     return group;
   }
@@ -113,9 +123,7 @@ function buildBeeBody() {
         [legX, side * 0.09 + leg.y * 0.1, -0.12 + leg.z * 0.1], lq);
     }
   }
-  const merged = mergeGeometries(parts);
-  parts.forEach(g => g.dispose());
-  return merged;
+  return mergeParts(parts);
 }
 
 // One wing: a flat ellipse whose root is at the origin and which reaches out along +y.
@@ -365,21 +373,117 @@ function boxEdges([sx, sy, sz]) {
   return edges;
 }
 
-// ---- camera body ----
-const CAMERA_BODY_SIZE_M = 0.012;
+// ---- tracking camera ----
+// A Raspberry Pi camera module: green board, black sensor module with a round lens, a short
+// ribbon cable and a status LED. Built with the lens along +y (the view axis) and the board
+// in the x-z plane. Display only; a real module is 25 x 24 mm.
+const PI_BOARD_M = [0.025, 0.0016, 0.024];     // width (x), thickness (y), height (z)
+const PI_MODULE_M = 0.0085;                    // side of the square sensor module
+const PI_MODULE_DEPTH_M = 0.005;
+const PI_LENS_RADIUS_M = 0.003;
+const PI_RIBBON_M = [0.016, 0.0004, 0.022];    // hangs down from the lower edge of the board
+const PI_LED_RADIUS_M = 0.0022;
+const PI_GREEN = 0x1f8a4c, PI_BLACK = 0x1c1c1e, PI_LENS = 0x0c1a26, PI_RIBBON = 0xd9d2c0;
+const LED_RUNNING = 0x22c55e, LED_STOPPED = 0xef4444;
+
+let cameraParts = null;   // geometry and materials shared by all tracking cameras
+function sharedCameraParts() {
+  if (!cameraParts) {
+    const front = PI_BOARD_M[1] / 2;
+    const body = mergeParts([
+      solid(new THREE.BoxGeometry(...PI_BOARD_M), PI_GREEN),
+      solid(new THREE.BoxGeometry(PI_MODULE_M, PI_MODULE_DEPTH_M, PI_MODULE_M)
+        .translate(0, front + PI_MODULE_DEPTH_M / 2, 0), PI_BLACK),
+      solid(cylinderY(PI_LENS_RADIUS_M, 0.002, 16)
+        .translate(0, front + PI_MODULE_DEPTH_M + 0.001, 0), PI_LENS),
+      solid(new THREE.BoxGeometry(...PI_RIBBON_M)
+        .translate(0, 0, -(PI_BOARD_M[2] + PI_RIBBON_M[2]) / 2), PI_RIBBON),
+    ]);
+    cameraParts = {
+      body,
+      led: new THREE.SphereGeometry(PI_LED_RADIUS_M, 10, 8)
+        .translate(PI_BOARD_M[0] / 2 - 0.004, front + PI_LED_RADIUS_M / 2, PI_BOARD_M[2] / 2 - 0.004),
+      bodyMaterial: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }),
+      ledMaterials: {
+        true: new THREE.MeshBasicMaterial({ color: LED_RUNNING }),
+        false: new THREE.MeshBasicMaterial({ color: LED_STOPPED }),
+      },
+    };
+  }
+  return cameraParts;
+}
 
 /**
- * Geometry of one tracking camera: a small rounded body with a lens along +y. Shared by all
- * cameras; the caller orients it and chooses the material (green: running, red: stopped).
- * @returns {THREE.BufferGeometry} Merged geometry.
+ * Create one tracking camera, looking from its position towards a point. Geometry and
+ * materials are shared between cameras, so the caller must not dispose them.
+ * @param {number[]} positionM Camera position [x, y, z] in m.
+ * @param {number[]} lookAtM Point on the view axis [x, y, z] in m.
+ * @returns {THREE.Group} The camera with `userData.led`; its LED shows "running".
  */
-export function createCameraGeometry() {
-  const body = solid(new RoundedBoxGeometry(CAMERA_BODY_SIZE_M, CAMERA_BODY_SIZE_M * 0.8,
-    CAMERA_BODY_SIZE_M, 2, 0.002), 0xffffff);
-  const lens = solid(new THREE.CylinderGeometry(0.0035, 0.0035, 0.004, 10)
-    .translate(0, CAMERA_BODY_SIZE_M * 0.4 + 0.001, 0), 0x303842);
-  const merged = mergeGeometries([body, lens]);
-  body.dispose();
-  lens.dispose();
-  return merged;
+export function createCameraModel(positionM, lookAtM) {
+  const parts = sharedCameraParts();
+  const cam = new THREE.Group();
+  const led = new THREE.Mesh(parts.led, parts.ledMaterials[true]);
+  cam.add(new THREE.Mesh(parts.body, parts.bodyMaterial), led);
+  cam.position.fromArray(positionM);
+  // The model looks along +y; z (the ribbon side is -z) stays as upright as the view allows.
+  const forward = new THREE.Vector3().fromArray(lookAtM).sub(cam.position).normalize();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 0, 1)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, forward);
+  cam.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, forward, up));
+  cam.userData = { led };
+  return cam;
+}
+
+/**
+ * Show on a camera's LED whether its node is running (green) or stopped (red).
+ * @param {THREE.Group} cam A camera made by `createCameraModel`.
+ * @param {boolean} running True for a running node.
+ */
+export function setCameraRunning(cam, running) {
+  cam.userData.led.material = sharedCameraParts().ledMaterials[!!running];
+}
+
+// ---- camera id labels ----
+// Text labels next to the cameras, as HTML elements over the 3D view. They are created
+// hidden; the caller repositions them only while they are shown, so they cost nothing
+// otherwise.
+const LABEL_OFFSET_PX = [8, -8];
+
+/**
+ * Create one hidden label per camera inside a layer element that covers the 3D view.
+ * @param {HTMLElement} layer Element the labels are added to; old camera labels are removed.
+ * @param {{id: string, position_m: number[]}[]} cameras Cameras of the scene message.
+ * @returns {{element: HTMLElement, position: THREE.Vector3}[]} The labels.
+ */
+export function createCameraLabels(layer, cameras) {
+  layer.querySelectorAll(".camera-label").forEach(element => element.remove());
+  return cameras.map(cam => {
+    const element = document.createElement("div");
+    element.className = "camera-label";
+    element.textContent = cam.id;
+    element.hidden = true;
+    layer.appendChild(element);
+    return { element, position: new THREE.Vector3().fromArray(cam.position_m) };
+  });
+}
+
+/**
+ * Show the labels at their cameras' places on the screen, or hide them all.
+ * @param {{element: HTMLElement, position: THREE.Vector3}[]} labels From `createCameraLabels`.
+ * @param {boolean} shown Whether the labels are switched on.
+ * @param {THREE.Camera} viewCamera The camera the 3D view is drawn with.
+ * @param {HTMLCanvasElement} canvas The canvas of the 3D view (same place as the layer).
+ */
+export function placeCameraLabels(labels, shown, viewCamera, canvas) {
+  const point = new THREE.Vector3();
+  for (const label of labels) {
+    point.copy(label.position).project(viewCamera);
+    // z above 1 means behind the viewer.
+    label.element.hidden = !shown || point.z > 1;
+    if (label.element.hidden) continue;
+    const x = (point.x * 0.5 + 0.5) * canvas.clientWidth + LABEL_OFFSET_PX[0];
+    const y = (-point.y * 0.5 + 0.5) * canvas.clientHeight + LABEL_OFFSET_PX[1];
+    label.element.style.transform = `translate(${x}px, ${y}px)`;
+  }
 }

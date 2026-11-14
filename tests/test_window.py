@@ -176,6 +176,8 @@ def test_state_message() -> None:
     }
     assert [b["id"] for b in message["bees"]] == list(range(10))
     assert len(message["bees"][0]["pos"]) == 3 and message["bees"][0]["state"] == "flying"
+    # The page turns each bee along its velocity; a state without it stops the page.
+    assert len(message["bees"][0]["vel"]) == 3
 
 
 def test_websocket_session() -> None:
