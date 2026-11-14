@@ -56,6 +56,7 @@
     <tr><td>Flying</td><td id="ro-flying">0</td></tr>
     <tr><td>Walking</td><td id="ro-walking">0</td></tr>
     <tr><td>Sitting</td><td id="ro-sitting">0</td></tr>
+    <tr><td>Mode</td><td id="ro-mode">-</td></tr>
   </table>
   <div class="legend row">
     <span><i class="dot" style="background:#f97316"></i>flying</span>
@@ -108,6 +109,15 @@
 
   <h2>Camera nodes</h2>
   <div class="row nodes" id="nodes"></div>
+
+  <div class="row">
+    <label for="displace_camera">Displace a camera</label>
+    <div class="inline">
+      <select id="displace_camera"></select>
+      <input type="number" id="displace_deg" min="-10" max="10" step="0.5" value="1"> °
+      <button id="displace">Turn</button>
+    </div>
+  </div>
 
   <h2>Display</h2>
   <div class="row"><label><span><input type="checkbox" id="show_cones" checked> Show view cones</span></label></div>
@@ -388,6 +398,7 @@ function handleScene(msg) {
   buildArena(arenaSize);
   clearGroup(cameraGroup);
   msg.cameras.forEach(buildCamera);
+  $("displace_camera").replaceChildren(...msg.cameras.map(cam => new Option(cam.id, cam.id)));
   nodeCameras = msg.nodes || [];
   buildNodeButtons(nodeCameras);
   resetView(arenaSize);
@@ -486,6 +497,8 @@ function updatePanel(msg) {
   if (msg.settings.bee_count !== undefined) setWidget("bee_count_num", msg.settings.bee_count);
   setWidget("seed", msg.seed);
   $("paused").textContent = msg.paused ? "Resume" : "Pause";
+  $("ro-mode").textContent = (msg.wand ? "wand run" : "bees") +
+    (msg.miscalibrated ? ", miscalibrated" : "");
   updateNodes(msg.stopped_nodes || []);
 }
 
@@ -559,6 +572,12 @@ function wireControls() {
   $("restart").addEventListener("click", () => {
     const seed = parseInt($("seed").value, 10);
     if (!Number.isNaN(seed)) sendControl("seed", seed);
+  });
+  $("displace").addEventListener("click", () => {
+    const degrees = parseFloat($("displace_deg").value);
+    if (Number.isNaN(degrees) || !$("displace_camera").value) return;
+    sendControl("camera_displaced",
+      { camera_id: $("displace_camera").value, angle_rad: degrees * Math.PI / 180 });
   });
   $("show_cones").addEventListener("change", () => {
     const on = $("show_cones").checked;

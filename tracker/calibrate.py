@@ -254,3 +254,29 @@ def solve_camera_pose(camera: TrackingCamera, points_m: np.ndarray, pixels_px: n
         gtol=SOLVER_TOLERANCE,
     )
     return _pose_from(camera.pose, result.x)
+
+
+def marker_error_px(
+    camera: TrackingCamera,
+    seen: tuple[tuple[int, float, float], ...],
+    marker_positions_m: dict[int, tuple[float, float, float]],
+) -> tuple[float, np.ndarray, np.ndarray]:
+    """Compare where a camera sees the wall markers with where it should see them.
+
+    Args:
+        camera: The camera with the pose the tracker currently uses.
+        seen: Reported markers as (marker_id, u_px, v_px). Unknown ids are ignored.
+        marker_positions_m: Marker id to known position, arena frame (m).
+
+    Returns:
+        The mean distance between seen and expected pixels (px; nan when no known marker
+        was seen), the (N, 3) positions and the (N, 2) seen pixels of the markers used.
+    """
+    known = [entry for entry in seen if entry[0] in marker_positions_m]
+    points_m = np.array([marker_positions_m[marker_id] for marker_id, _, _ in known])
+    pixels_px = np.array([(u_px, v_px) for _, u_px, v_px in known])
+    if not known:
+        return float("nan"), points_m.reshape(0, 3), pixels_px.reshape(0, 2)
+    expected_px = project(camera.pose, camera.model, points_m)
+    error_px = float(np.mean(np.linalg.norm(expected_px - pixels_px, axis=1)))
+    return error_px, points_m, pixels_px
