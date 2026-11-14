@@ -193,6 +193,8 @@ side by side.
   follows it. The panel below the 3D view shows the robot's cinema picture on the left
   (while a simulator window is open) and the 16 camera panels on the right.
 - The purple robot is drawn from the robot's own `robot_pose` messages. "Show robot" hides it.
+- "Show camera IDs" (both windows) puts the camera ID next to each tracking camera. The
+  LED on a camera is green while its node runs and red when it is stopped or silent.
 
 If the simulator is restarted (seed and "Restart"), the tracker notices and starts with
 fresh tracks.

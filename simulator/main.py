@@ -799,6 +799,7 @@ def state_message(simulation: Simulation) -> str:
             {
                 "id": bee.id,
                 "pos": [round(float(x), POSITION_DECIMALS) for x in bee.position_m],
+                "vel": [round(float(x), POSITION_DECIMALS) for x in bee.velocity_m_s],
                 "state": bee.state,
             }
             for bee in simulation.bees
