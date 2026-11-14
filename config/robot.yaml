@@ -11,16 +11,22 @@
 rail:
   start_m: [0.0, -0.15, 0.15]       # m, tilt axis at rail_m = 0; assumed
   length_m: 0.90                    # m, travel; assumed (first rail in the video: about 1.2 m)
-  max_speed_m_s: 2.0                # m/s; assumed
-  max_acceleration_m_s2: 20.0       # m/s^2; assumed
+  max_speed_m_s: 3.0                # m/s; assumed (Luke: the rail actuator is rated for 3 m/s)
+  max_acceleration_m_s2: 15.0       # m/s^2; assumed. A NEMA 23 on a belt gives about 40 N at
+                                    # 3 m/s (torque falls with speed); 3 kg moving mass and a
+                                    # margin for friction and cables leave about 15 m/s^2
 
 # Tilt axis. It is parallel to the rail and moves with the carriage. 0 = camera looks
-# along +y (horizontal), positive = up.
+# along +y (horizontal), positive = up. Driven by a NEMA 23 stepper with a 5:1 gearbox
+# (Luke: NEMA 23 with gearbox).
 tilt:
   min_rad: -0.8                     # rad; assumed
   max_rad: 0.8                      # rad; assumed
-  max_speed_rad_s: 10.0             # rad/s; assumed
-  max_acceleration_rad_s2: 200.0    # rad/s^2; assumed
+  max_speed_rad_s: 12.0             # rad/s; assumed. About 600 rpm at the motor stays strong
+                                    # enough; 5:1 gives 120 rpm at the axis = 12.6 rad/s
+  max_acceleration_rad_s2: 90.0     # rad/s^2; assumed. About 1.2 Nm usable at speed, 5:1 and 90 %
+                                    # gearbox efficiency give 5 Nm; head inertia about 0.03 kg m^2;
+                                    # half of the torque is kept for friction and cables
 
 # Focus, as the distance from the lens reference point to the focus plane.
 focus:

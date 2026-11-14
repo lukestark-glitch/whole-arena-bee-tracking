@@ -226,8 +226,13 @@ measured against the truth.
 
 **Stage 5 follow-ups**
 
-- Done: the control window draws the robot with the same model as the simulator window
-  (rail bars, carriage with yoke, camera body, lens).
+- Done: the control window uses the same robot model as the simulator window
+  (`shared/web/models.js`).
+- Done: softer 3D models (bee, robot, arena, tracking cameras), shared style sheet and card
+  layout for both windows, a "Show trails" switch in the control window.
+- Done: robot limits for a 3 m/s rail and NEMA 23 steppers with gearboxes.
+- Not re-measured: the robot result in `CHANGELOG.md` (rerun `experiments` with the new
+  `config/robot.yaml`).
 
 ---
 
