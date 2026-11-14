@@ -66,6 +66,8 @@ simulator window on port 8765.
 | `--duration S` | Stop after `S` seconds of simulation time | run until Ctrl+C |
 | `--time-scale X` | Speed at start against real time, `0.5` is half speed | `1.0` |
 | `--fast` | As fast as possible, no pacing | off |
+| `--miscalibrated` | True cameras and robot differ from the config files (`calibration` section) | off |
+| `--wand` | Calibration wand instead of bees; stops after the wand run | off |
 
 To see what it sends, start the listener in a second terminal first:
 
@@ -91,6 +93,7 @@ the control window on port 8766. Start it before the simulator.
 | `--config PATH` | Configuration file | `config/default.yaml` |
 | `--robot PATH` | Robot file | `config/robot.yaml` |
 | `--auto-select` | Select the oldest confirmed track whenever none is selected | off |
+| `--calibration PATH` | Calibration file from `tracker.wand_run` | nominal values of the config files |
 | `--log PATH` | Track log file | `logs/tracks.jsonl` |
 | `--duration S` | Stop after `S` seconds of simulation time | run until Ctrl+C |
 
@@ -107,6 +110,34 @@ python -m simulator.main --duration 60                                   # termi
 Terminal 1 prints the result: position error, ID swaps, ghost tracks and the share of
 time each bee was tracked. The numbers of the default configuration are recorded in
 `CHANGELOG.md`. The same seed gives the same numbers.
+
+## Calibrate
+
+The simulator can pretend that the cameras and the robot were not built exactly as the
+config files say (`--miscalibrated`: 1 cm and 2° per camera). The tracker then has to find
+the real poses itself. Two terminals, in this order:
+
+```bash
+python -m tracker.wand_run                          # terminal 1, waits for the wand run
+python -m simulator.main --wand --miscalibrated     # terminal 2, stops after 38 s
+```
+
+Terminal 1 prints how far every camera and the robot were from the nominal values and
+writes `logs/calibration.json`. Then track with it (three terminals as in the baseline):
+
+```bash
+python -m experiments.metrics --tracks logs/tracks.jsonl --duration 60
+python -m tracker.main --duration 60 --calibration logs/calibration.json
+python -m simulator.main --duration 60 --miscalibrated
+```
+
+Use the same seed for the wand run and the later runs: the camera errors depend on it.
+Without `--calibration` the tracker uses the nominal poses and tracks badly until the
+marker check has repaired every camera.
+
+To see the marker check: run tracker and simulator normally, open both windows, pick a
+camera under "Displace a camera" in the simulator window and press "Turn". Within a second
+the control window lists the camera under "Health" as displaced and corrected.
 
 ## Measure the robot
 

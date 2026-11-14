@@ -11,7 +11,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 3 | Tracking core | done |
 | 4 | Control window | done |
 | 5 | Robot | done |
-| 6 | Calibration | not started |
+| 6 | Calibration | done |
 | 7 | Experiments and other arena shapes | not started |
 | 8 | Optional: rendered camera images and a real detector | not planned yet |
 
