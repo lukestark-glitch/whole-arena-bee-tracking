@@ -234,6 +234,10 @@ measured against the truth.
 - Done: fixed the windows after the model change (robot and cameras missing, only one bee
   drawn, camera panels frozen); tracks drawn as bees; Raspberry Pi camera models with a
   status LED; "Show camera IDs" switch in both windows; styled scroll bars.
+- Done: robot follows again with the simulator window open; teal robot accent; polished
+  camera models; "Show prediction lines" switch.
+- Open: the tilt acceleration limit of 90 rad/s² costs about 9 points of time in frame
+  against 200 rad/s² (see `CHANGELOG.md`). Decide on the real value of the tilt drive.
 - Not re-measured: the robot result in `CHANGELOG.md` (rerun `experiments` with the new
   `config/robot.yaml`).
 

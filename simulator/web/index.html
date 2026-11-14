@@ -231,8 +231,15 @@ function clearCameras() {
 // Build the robot model (rail, carriage with yoke and motors, tilting head).
 function buildRobot(robot) {
   clearGroup(robotGroup);
-  robotModel = buildRobotModel(robot);
-  robotGroup.add(robotModel.group);
+  // A robot model that cannot be built is reported with its cause and left out; the rest
+  // of the window keeps working.
+  try {
+    robotModel = buildRobotModel(robot);
+    robotGroup.add(robotModel.group);
+  } catch (error) {
+    robotModel = null;
+    console.error("The robot model could not be built:", error);
+  }
 }
 
 // Move the robot model: carriage along the rail, head about the x axis, sight line to the

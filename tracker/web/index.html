@@ -75,6 +75,7 @@
     <h2>Display</h2>
     <label class="switch"><input type="checkbox" id="show-robot" checked>Show robot</label>
     <label class="switch"><input type="checkbox" id="show-trails" checked>Show trails</label>
+    <label class="switch"><input type="checkbox" id="show-predictions" checked>Show prediction lines</label>
     <label class="switch"><input type="checkbox" id="show-camera-ids">Show camera IDs</label>
   </div>
 
@@ -109,7 +110,7 @@
     <span class="empty">cinema view of the robot, and detections of the latest message</span></div>
   <div id="strip-body">
     <div id="cinema-box">
-      <img id="cinema" alt="cinema view of the robot">
+      <img id="cinema" alt="cinema view of the robot" hidden>
       <div class="empty" id="cinema-note">cinema view: needs an open simulator window</div>
     </div>
     <div id="cam-grid"></div>
@@ -279,28 +280,52 @@ function createTrackView(id) {
   const halo = new THREE.Mesh(haloGeometry, new THREE.MeshBasicMaterial({
     color, transparent: true, opacity: 0.25, depthWrite: false }));
   const trail = new THREE.Line(createTrailGeometry(), new THREE.LineBasicMaterial({ color }));
-  const predLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color }));
-  const predMarker = new THREE.Mesh(predGeometry, new THREE.MeshBasicMaterial({ color }));
   const label = document.createElement("div");
   label.className = "label";
   label.textContent = String(id);
   label.style.color = color;
   labelLayer.appendChild(label);
   trail.frustumCulled = false;
-  predLine.frustumCulled = false;
-  scene.add(bee, dot, halo, trail, predLine, predMarker);
-  return { id, bee, dot, halo, trail, predLine, predMarker, label, points: [] };
+  scene.add(bee, dot, halo, trail);
+  // The prediction line and marker are built only while "Show prediction lines" is on.
+  return { id, color, bee, dot, halo, trail, predLine: null, predMarker: null, label, points: [] };
 }
 
 // Remove a track's display objects and free their GPU resources.
 function removeTrackView(view) {
-  for (const o of [view.dot, view.halo, view.trail, view.predLine, view.predMarker]) {
+  for (const o of [view.dot, view.halo, view.trail]) {
     scene.remove(o);
     disposeObject(o, SHARED);
   }
+  removePrediction(view);
   // The bee shares its geometry and materials with all other bees: remove, do not dispose.
   scene.remove(view.bee);
   view.label.remove();
+}
+
+// Remove a track's prediction line and marker, if it has them.
+function removePrediction(view) {
+  if (!view.predLine) return;
+  for (const o of [view.predLine, view.predMarker]) {
+    scene.remove(o);
+    disposeObject(o, SHARED);
+  }
+  view.predLine = view.predMarker = null;
+}
+
+// Draw the line from a track to its predicted position and a marker there. With the
+// switch off nothing is built, and what exists is removed.
+function updatePrediction(view, pos, pred) {
+  if (!$("show-predictions").checked) { removePrediction(view); return; }
+  if (!view.predLine) {
+    view.predLine = new THREE.Line(new THREE.BufferGeometry(),
+      new THREE.LineBasicMaterial({ color: view.color }));
+    view.predLine.frustumCulled = false;
+    view.predMarker = new THREE.Mesh(predGeometry, new THREE.MeshBasicMaterial({ color: view.color }));
+    scene.add(view.predLine, view.predMarker);
+  }
+  setLinePoints(view.predLine, [pos, pred]);
+  view.predMarker.position.copy(pred);
 }
 
 // Replace a line's geometry with one through the given points.
@@ -340,9 +365,7 @@ function updateTrackView(view, track, t) {
 
   updateTrail(view, pos, t);
 
-  const pred = new THREE.Vector3().fromArray(track.pred);
-  setLinePoints(view.predLine, [pos, pred]);
-  view.predMarker.position.copy(pred);
+  updatePrediction(view, pos, new THREE.Vector3().fromArray(track.pred));
 }
 
 // Create, update and remove track views to match a tracks message.
@@ -595,14 +618,21 @@ function drawCameraPanels() {
 function buildRobot(robot) {
   clearGroup(robotGroup);
   robotInfo = robot;
-  robotModel = buildRobotModel(robot);
-  robotGroup.add(robotModel.group);
+  // A robot model that cannot be built is reported with its cause and left out; the rest
+  // of the window keeps working.
+  try {
+    robotModel = buildRobotModel(robot);
+    robotGroup.add(robotModel.group);
+  } catch (error) {
+    robotModel = null;
+    console.error("The robot model could not be built:", error);
+  }
 }
 
 // Place the robot as its last robot_pose says; hide it while no pose is known or the
 // checkbox is off. The sight line ends at the focus plane.
 function updateRobot(pose) {
-  robotGroup.visible = !!(pose && robotInfo && $("show-robot").checked);
+  robotGroup.visible = !!(pose && robotModel && $("show-robot").checked);
   if (robotGroup.visible) poseRobotModel(robotModel, robotInfo, pose);
 }
 
@@ -653,6 +683,7 @@ function connectCinema(port) {
     const old = image.src;
     image.src = URL.createObjectURL(event.data);
     if (old) URL.revokeObjectURL(old);
+    image.hidden = false;
     document.getElementById("cinema-note").hidden = true;
   };
 }
@@ -692,6 +723,8 @@ $("show-trails").addEventListener("change", () => {
   for (const view of trackViews.values()) { view.points = []; view.trail.visible = false; }
 });
 $("show-robot").addEventListener("change", () => updateRobot(lastTracks && lastTracks.robot));
+// The lines are removed or built with the next tracks message; while paused, at once.
+$("show-predictions").addEventListener("change", () => { if (lastTracks) updateTracks(lastTracks); });
 // One last placement after switching off hides the labels.
 $("show-camera-ids").addEventListener("change", () => {
   placeCameraLabels(cameraLabels, $("show-camera-ids").checked, camera, canvas);

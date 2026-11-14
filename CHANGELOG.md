@@ -3,6 +3,32 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-14: Stage 5 polish 3
+
+- Fixed: the robot stopped following a selected bee while the simulator window was open on
+  a busy computer. The simulator read one `target` per turn of its event loop; once it ran
+  late a backlog built up and every target was older than the timeout. It now reads all
+  waiting targets before each frame (D80). With the page open in a software-rendering
+  browser the robot had a target in 37 to 58 % of the snapshots before and in 100 % after.
+- The robot model reports a build failure in the console instead of failing silently (D81).
+- Robot accent colour is teal instead of purple (D82).
+- Tracking cameras: rounded board, lens ring with raised barrel, ribbon cable with a bend,
+  bracket arm and foot, status LED.
+- Control window: "Show prediction lines" switch (D83).
+
+**Robot limits** (one process, 60 s, 10 bees, seed 1, `target` one frame late):
+
+| Robot file | Time in frame | Time in focus |
+| --- | --- | --- |
+| Before PR 11 (rail 2 m/s, 20 m/s²; tilt 10 rad/s, 200 rad/s²) | 91.5 % | 43.6 % |
+| Now (rail 3 m/s, 15 m/s²; tilt 12 rad/s, 90 rad/s²) | 80.7 % | 41.1 % |
+| Now, but rail 20 m/s² | 82.2 % | 42.0 % |
+| Now, but tilt 200 rad/s² | 89.9 % | 43.0 % |
+
+The code gives the same numbers before and after PR 11 with the same robot file. The new
+limits cost about 11 points of time in frame, almost all of it from the tilt acceleration.
+The limits were left as they are.
+
 ## 2026-11-14: Stage 5 polish 2
 
 - Fixed: robot and tracking cameras were missing in both windows. Parts with and without an

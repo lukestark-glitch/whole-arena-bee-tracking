@@ -107,7 +107,10 @@ One simulator frame with the robot:
    stereo exposure that is due is taken at the start of a control step.
 4. The bees move.
 
-`target` datagrams from the tracker are taken in between two frames. The robot therefore
+All `target` datagrams that are waiting are read before each frame, and the robot keeps
+the newest. (Reading them one per turn of the event loop let a backlog build up whenever
+the simulator ran late, for example with its window open on a busy computer; the robot then
+only saw targets older than its timeout and stood still.) The robot therefore
 needs the simulator to run in real time: with `--fast` the tracker falls behind, the
 `target` messages are older than `target_timeout_s` and the robot holds position.
 
