@@ -219,6 +219,8 @@ class CalibrationSettings:
     markers: tuple[Marker, ...]
 
 
+# Known points needed to estimate the six pose values of one camera.
+MIN_MARKERS_FOR_POSE = 4
 # Reference points needed to fix position, orientation and scale of the arena frame.
 REFERENCE_POINT_COUNT = 3
 
@@ -662,7 +664,8 @@ def _parse_calibration(raw: Any) -> CalibrationSettings:
 
     Raises:
         ConfigError: If a key is missing, there are not exactly three reference points, a
-            count or rate is not positive, or two markers share an id.
+            count or rate is not positive, `min_markers` is below 4, or two markers share
+            an id.
     """
     section = "calibration"
     names = (
@@ -687,6 +690,8 @@ def _parse_calibration(raw: Any) -> CalibrationSettings:
         raise ConfigError(f"calibration needs exactly {REFERENCE_POINT_COUNT} reference points")
     if min(whole.values()) < 1 or numbers["marker_rate_hz"] <= 0.0:
         raise ConfigError("calibration counts, the frame step and marker_rate_hz must be above 0")
+    if whole["min_markers"] < MIN_MARKERS_FOR_POSE:
+        raise ConfigError(f"calibration min_markers must be at least {MIN_MARKERS_FOR_POSE}")
     if len({marker.id for marker in markers}) != len(markers):
         raise ConfigError("calibration marker ids must be unique")
     return CalibrationSettings(

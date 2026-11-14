@@ -122,8 +122,8 @@ def fit_robot(robot: Robot, samples: list[RobotSample]) -> tuple[Robot, float]:
     fitted = dataclasses.replace(
         robot,
         rail_start_m=(float(result.x[0]), float(result.x[1]), float(result.x[2])),
-        # Focus is measured from the lens point, so the line's intercept is
-        # minus the lens offset.
-        lens_offset_m=-offset_m,
+        # focus = scale * (range - lens offset), so the line's intercept is
+        # minus scale times the lens offset.
+        lens_offset_m=-offset_m / scale,
     )
     return fitted, scale

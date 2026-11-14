@@ -164,6 +164,8 @@ def create_tracker(
 def check_markers(tracker: Tracker, frame: Frame) -> None:
     """Correct every camera that sees the wall markers away from where they should be.
 
+    A correction is kept only if the new pose brings the marker error below the threshold.
+
     Args:
         tracker: Tracker; displaced cameras get a new pose and an entry in `corrections`.
         frame: A frame; only cameras that reported enough markers in it are checked.
@@ -176,11 +178,16 @@ def check_markers(tracker: Tracker, frame: Frame) -> None:
         if len(points_m) < settings.min_markers or error_px <= settings.marker_threshold_px:
             continue
         corrected = replace(camera, pose=solve_camera_pose(camera, points_m, pixels_px))
+        after_px = marker_error_px(corrected, seen, positions_m)[0]
+        # A new pose that still does not explain the markers (a wrong marker, a bad fit)
+        # is no improvement to rely on; the camera keeps its pose and is checked again.
+        if after_px > settings.marker_threshold_px:
+            continue
         tracker.cameras[index] = corrected
         tracker.corrections[camera.id] = {
             "t": round(frame.t_s, SECOND_DECIMALS),
             "error_px": round(error_px, PIXEL_DECIMALS),
-            "after_px": round(marker_error_px(corrected, seen, positions_m)[0], PIXEL_DECIMALS),
+            "after_px": round(after_px, PIXEL_DECIMALS),
         }
 
 
