@@ -113,6 +113,7 @@
   <div id="nodes"></div>
   <div>Cameras per track: <span id="cam-stats">-</span></div>
   <div id="cam-warning"></div>
+  <div id="corrections"></div>
 </div>
 
 <div id="strip">
@@ -504,6 +505,7 @@ function updateHealth(msg) {
     chip.classList.toggle("stopped", stopped);
     chip.querySelector("b").textContent = stopped ? "STOPPED" : "ok";
   }
+  updateCorrections(msg.health.corrected_cameras || {});
   const counts = confirmedOf(msg.tracks).map(t => t.cameras);
   if (counts.length === 0) {
     $("cam-stats").textContent = "-";
@@ -516,6 +518,17 @@ function updateHealth(msg) {
   const low = counts.filter(c => c < sceneInfo.minCameras).length;
   $("cam-warning").textContent =
     low ? `Warning: ${low} track(s) seen by fewer than ${sceneInfo.minCameras} cameras` : "";
+}
+
+// List the cameras the marker check found displaced and corrected.
+function updateCorrections(corrections) {
+  $("corrections").replaceChildren(...Object.entries(corrections).map(([id, c]) => {
+    const chip = document.createElement("div");
+    chip.className = "chip stopped";
+    chip.innerHTML = `${id}: <b>displaced</b><small>at ${c.t.toFixed(1)} s, markers off by ` +
+      `${c.error_px.toFixed(1)} px; corrected to ${c.after_px.toFixed(1)} px</small>`;
+    return chip;
+  }));
 }
 
 // Colour camera markers red for cameras of silent nodes.
