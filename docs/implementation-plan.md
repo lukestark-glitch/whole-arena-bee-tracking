@@ -231,6 +231,9 @@ measured against the truth.
 - Done: softer 3D models (bee, robot, arena, tracking cameras), shared style sheet and card
   layout for both windows, a "Show trails" switch in the control window.
 - Done: robot limits for a 3 m/s rail and NEMA 23 steppers with gearboxes.
+- Done: fixed the windows after the model change (robot and cameras missing, only one bee
+  drawn, camera panels frozen); tracks drawn as bees; Raspberry Pi camera models with a
+  status LED; "Show camera IDs" switch in both windows; styled scroll bars.
 - Not re-measured: the robot result in `CHANGELOG.md` (rerun `experiments` with the new
   `config/robot.yaml`).
 

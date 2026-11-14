@@ -47,3 +47,16 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; m
 .status-ok { color: var(--ok); font-weight: 600; }
 .status-bad { color: var(--bad); font-weight: 600; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+/* Scroll bars of the panels, the track list and the camera grid: thin, rounded thumb on a
+   transparent track. The first two properties are the standard (Firefox, new Chrome and
+   Safari), the ::-webkit rules cover older Safari and Chrome. */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+/* Camera id labels over the 3D view (switch "Show camera IDs"). */
+#labels { overflow: hidden; pointer-events: none; }
+.camera-label { position: absolute; left: 0; top: 0; font-size: 10px; color: var(--muted);
+  white-space: nowrap; }
+.camera-label[hidden] { display: none; }
