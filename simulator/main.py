@@ -8,8 +8,8 @@ The page changes the simulation only through `apply_control`.
 
 The robot emulator runs inside the simulation so that it shares simulation time: every
 frame, `step_simulation` lets the robot's stereo camera look at the true bees and runs
-the robot's control steps. `run` also receives the `target` datagrams for the robot and
-relays the cinema view, which the simulator window renders, to the control window.
+the robot's control steps. `run` also reads the `target` datagrams for the robot before
+every frame and relays the cinema view, which the simulator window renders, to the control window.
 
 Two options serve the calibration (Stage 6). `--miscalibrated` moves every true camera and
 the true robot away from the values in the config files, so the tracker has something to
@@ -92,6 +92,8 @@ PAUSE_POLL_S = 0.02
 WAND_ID = 0
 # Largest angle the page may displace a camera by (rad); a real knock is far smaller.
 MAX_DISPLACEMENT_RAD = 0.2
+# Largest UDP datagram a `target` can be read as.
+MAX_DATAGRAM_BYTES = 65535
 # Slack when comparing times that were computed as count / rate (s).
 TIME_EPSILON_S = 1e-9
 # Robot limits the page may change: control name -> (axis, limit, largest allowed value).
@@ -845,25 +847,38 @@ def apply_target(simulation: Simulation, datagram: bytes) -> None:
         receive_target(simulation.controller, message)
 
 
-class _TargetProtocol(asyncio.DatagramProtocol):
-    """Receives `target` datagrams on the event loop, between two frames."""
+def _target_socket(port: int) -> socket.socket:
+    """Open the UDP socket the `target` datagrams arrive on.
 
-    def __init__(self, simulation: Simulation) -> None:
-        """Create the protocol.
+    Args:
+        port: UDP port to bind on the local host.
 
-        Args:
-            simulation: The running simulation.
-        """
-        self._simulation = simulation
+    Returns:
+        The bound, non-blocking socket.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_HOST, port))
+    sock.setblocking(False)
+    return sock
 
-    def datagram_received(self, data: bytes, addr: object) -> None:
-        """Hand one datagram to the robot.
 
-        Args:
-            data: The datagram bytes.
-            addr: Sender address (unused).
-        """
-        apply_target(self._simulation, data)
+def _drain_targets(simulation: Simulation, targets: socket.socket) -> None:
+    """Hand every waiting `target` datagram to the robot; it keeps the newest.
+
+    All of them are read at once. Reading one per turn of the event loop let a backlog
+    build up whenever the simulator ran late, and the robot then only ever saw targets
+    that were older than its timeout.
+
+    Args:
+        simulation: Simulation; the robot is modified in place.
+        targets: Non-blocking socket from `_target_socket`.
+    """
+    while True:
+        try:
+            datagram = targets.recv(MAX_DATAGRAM_BYTES)
+        except BlockingIOError:
+            return
+        apply_target(simulation, datagram)
 
 
 def _serve_page(connection: ServerConnection, request: Request) -> Response | None:
@@ -909,6 +924,7 @@ async def _frame_loop(
     simulation: Simulation,
     pending: list[str | bytes],
     sock: socket.socket,
+    targets: socket.socket,
     duration_s: float | None,
     fast: bool,
 ) -> None:
@@ -922,7 +938,8 @@ async def _frame_loop(
         simulation: Simulation, modified in place.
         pending: Control messages from the pages, applied only between frames so that a
             frame is never sent half with old and half with new settings.
-        sock: UDP socket.
+        sock: UDP socket the datagrams are sent from.
+        targets: Non-blocking UDP socket on which `target` arrives; read before each frame.
         duration_s: Simulation time to run (s), or None to run until interrupted.
         fast: Send as fast as possible, no pacing.
     """
@@ -930,6 +947,7 @@ async def _frame_loop(
     frame_start_s = time.monotonic()
     while duration_s is None or simulation.frame * period_s < duration_s:
         _apply_pending(simulation, pending)
+        _drain_targets(simulation, targets)
         if simulation.paused:
             await asyncio.sleep(PAUSE_POLL_S)
             frame_start_s = time.monotonic()
@@ -1009,21 +1027,18 @@ async def _serve(
         finally:
             pages.discard(connection)
 
-    targets, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-        lambda: _TargetProtocol(simulation), local_addr=(UDP_HOST, config.ports.target)
-    )
-    try:
+    with (
+        _target_socket(config.ports.target) as targets,
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock,
+    ):
         async with serve(
             handle_page, UDP_HOST, config.ports.simulator_window, process_request=_serve_page
         ):
             snapshots = asyncio.create_task(_snapshot_loop(simulation, pages))
             try:
-                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                    await _frame_loop(simulation, pending, sock, duration_s, fast)
+                await _frame_loop(simulation, pending, sock, targets, duration_s, fast)
             finally:
                 snapshots.cancel()
-    finally:
-        targets.close()
 
 
 def run(
