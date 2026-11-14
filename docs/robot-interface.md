@@ -79,6 +79,8 @@ Known from the videos:
 | Rail drive | Timing belt with glass-fibre core, 50:1 gearbox, motor with encoder |
 | Later rail | Commercial linear rail, smaller and lighter |
 | Axes | Rail, tilt, focus motor |
+| Rail speed | 3 m/s (stated by Luke, rated speed of the rail actuator; not from the videos) |
+| Tilt and focus drives | NEMA 23 stepper motors with gearboxes (stated by Luke) |
 | Cinema lens | 180 mm macro at 1.5× magnification |
 | Stereo camera | 2.2 mm lenses, 105° rectified field of view, 50 mm baseline, bee at about 150 mm |
 | Tracking rate | about 32 Hz full image, about 60 Hz in the search window |
@@ -89,8 +91,8 @@ Known from the videos:
 Missing and to be asked for:
 
 - Length of travel of the current rail
-- Maximum speed and acceleration of the rail
-- Maximum speed and acceleration of the tilt axis, and its range
+- Maximum acceleration of the rail (the speed of 3 m/s is given)
+- Gear ratio, maximum speed and acceleration of the tilt axis, and its range
 - Maximum speed of the focus motor and the focus range
 - Moving mass of the carriage with camera
 - Delay from stereo exposure to motor command
