@@ -65,6 +65,21 @@ Owns simulation time and the ground truth.
   between frames, so a run with the same seed and the same changes at the same frames
   repeats exactly.
 
+Calibration support (Stage 6):
+
+- `--miscalibrated`: every true camera is moved by `camera_error_position_m` and turned by
+  `camera_error_angle_rad` in a random direction, and the true rail start of the robot is
+  shifted by `robot_error_m`. The config files then hold only nominal values, as with real
+  hardware. The errors depend on the seed: use the same seed for the wand run and for the
+  runs that use its calibration.
+- `--wand`: a wand run instead of bees. The wand is the only point in the arena. It rests
+  on the three reference points, sweeps the arena, then rests on the stop points
+  (schedule in `shared/wand.py`). The robot is aimed and focused at the wand the whole
+  time, as an operator would do it. The run ends by itself.
+- Wall markers: every camera reports the markers of `calibration.markers` it sees, once
+  per `1 / marker_rate_hz`, in the `markers` field of `detections`.
+- Control `camera_displaced` turns one true camera by a small angle.
+
 ### `robot_emulator/` (Stage 5)
 
 Stands in for the existing camera robot and its software. Runs inside the simulator process
@@ -109,6 +124,19 @@ The software under test. Knows nothing about the simulator.
   arrived), a log of all tracks for the metrics.
 - Input from the robot: `robot_pose`. The newest one gives `distance_m` and the list of
   other bees in the robot's stereo image.
+- Calibration: `tracker/wand_run.py` is a command of its own. It listens to a wand run,
+  estimates all camera poses by bundle adjustment (`tracker/calibrate.py`: unknowns are six
+  pose values per camera and the wand position of every used frame, the three reference
+  points are known and fix position, orientation and scale), then fits the robot's rail
+  start, lens offset and focus scale from the stop points
+  (`tracker/robot_calibration.py`), and writes `logs/calibration.json`. The tracker loads
+  that file with `--calibration`; without it the nominal values of the config files are
+  used.
+- Marker check: when a frame carries wall markers, each camera's markers are compared
+  with where its current pose expects them. If the mean distance is above
+  `marker_threshold_px` (and at least `min_markers` are seen), the camera counts as
+  displaced: its pose is re-estimated from the markers and the correction is listed in the
+  control window.
 - `--auto-select` selects the oldest confirmed track whenever none is selected, for runs
   without a control window.
 - Serves the control window (page and WebSocket on one port), sends it a snapshot at most
@@ -192,7 +220,7 @@ Simulator → page, at most 30 times per second of wall time (also while paused)
 
 ```json
 {"type": "state", "frame": 1042, "t": 17.366667, "seed": 1, "paused": false,
- "time_scale": 1.0,
+ "time_scale": 1.0, "wand": false, "miscalibrated": false,
  "settings": {"bee_count": 10, "max_speed_m_s": 5.0, "pixel_sigma_px": 0.5,
               "dropout_probability": 0.02, "rail_max_speed_m_s": 2.0,
               "rail_max_acceleration_m_s2": 20.0, "tilt_max_speed_rad_s": 10.0,
@@ -219,6 +247,7 @@ Page → simulator, one message per change:
 | `seed` | int | Restart at frame 0 with this seed and the current settings |
 | `node_stopped` | `{"node_id": "node-03", "stopped": true}` | A stopped node sends nothing for both of its cameras; `false` starts it again |
 
+| `camera_displaced` | `{"camera_id": "cam-06", "angle_rad": 0.02}`, angle within 0.2 | The true camera is turned by that angle about its vertical image axis |
 | `rail_max_speed_m_s` | float above 0, at most 20 | Speed limit of the rail |
 | `rail_max_acceleration_m_s2` | float above 0, at most 500 | Acceleration limit of the rail |
 | `tilt_max_speed_rad_s` | float above 0, at most 100 | Speed limit of the tilt axis |
@@ -254,7 +283,8 @@ Tracker → page, at most 30 times per second of simulation time:
              "acc": [1.2, 0.0, -0.4], "pred": [0.492, 0.1383, 0.1761],
              "state": "flying", "confirmed": true, "cameras": 7}],
  "detections": {"cam-01": [[512.31, 300.87, 14.2, 4], [901.05, 644.4, 9.8, -1]]},
- "health": {"silent_nodes": ["node-03"], "camera_age_s": {"cam-01": 0.0}},
+ "health": {"silent_nodes": ["node-03"], "camera_age_s": {"cam-01": 0.0},
+            "corrected_cameras": {"cam-06": {"t": 12.0, "error_px": 15.2, "after_px": 0.6}}},
  "robot": {"rail_m": 0.392, "tilt_rad": 0.11, "focus_m": 0.215}}
 ```
 
@@ -267,6 +297,7 @@ Tracker → page, at most 30 times per second of simulation time:
 | `detections` | Per camera: `[u, v, size, track_id]`; `track_id` is -1 for a detection no track used |
 | `health.silent_nodes` | Nodes whose cameras have all been silent for `node_silent_after_s` |
 | `health.camera_age_s` | Simulation time since each camera last reported |
+| `health.corrected_cameras` | Cameras the marker check found displaced: time of the last correction, mean marker error before and after it (px) |
 | `robot` | Axes of the newest `robot_pose`, or `null` before the first. The window draws the robot from these and from the robot file, never from the truth |
 
 Page → tracker:

@@ -6,6 +6,11 @@ first, then new points), updates the tracks and writes one JSON line to the log.
 `process_frame` is pure (no socket, no clock) so tests can drive it directly; `run` adds
 the UDP socket and the log file.
 
+The cameras start from the nominal poses of the config or, with `--calibration`, from a
+calibration file written by `tracker/wand_run.py`. About once per second the cameras also
+report the wall markers. A camera that sees them away from where they should be has been
+displaced: the tracker re-estimates its pose from the markers and reports the correction.
+
 While a track is selected, every frame also yields a `target` message for the robot. Its
 distance and the list of other bees in the robot's view are computed from the last
 `robot_pose` the robot sent.
@@ -20,7 +25,7 @@ import asyncio
 import json
 import socket
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +35,7 @@ from websockets.exceptions import ConnectionClosed
 
 from shared.config import (
     Arena,
+    CalibrationSettings,
     Config,
     Robot,
     TrackerSettings,
@@ -53,6 +59,7 @@ from shared.protocol import (
     encode_target,
 )
 from shared.web import page_response
+from tracker.calibrate import marker_error_px, solve_camera_pose
 from tracker.receiver import TIME_ROUNDING_S, Frame, FrameAssembler, frames_from_datagram
 from tracker.tracks import (
     Track,
@@ -62,6 +69,7 @@ from tracker.tracks import (
     predict_tracks,
     update_tracks,
 )
+from tracker.wand_run import Calibration, apply_calibration, load_calibration
 from tracker.triangulate import (
     NO_POINT,
     Points,
@@ -107,6 +115,9 @@ class Tracker:
         auto_select: Select the oldest confirmed track whenever none is selected, for
             runs without a control window.
         robot_pose: The newest `robot_pose`, or None before the first.
+        calibration: Wall markers and the threshold of the marker check.
+        corrections: Camera id to its last correction after a displacement: `t` (s),
+            `error_px` before and `after_px` after the pose was re-estimated.
     """
 
     cameras: list[TrackingCamera]
@@ -114,28 +125,70 @@ class Tracker:
     settings: TrackerSettings
     track_set: TrackSet
     robot: Robot
+    calibration: CalibrationSettings
     auto_select: bool = False
+    corrections: dict[str, dict[str, float]] = field(default_factory=dict)
     robot_pose: RobotPose | None = None
     selected_id: int | None = None
     last_frame: int | None = None
     detections: dict[str, list[list[float]]] = field(default_factory=dict)
 
 
-def create_tracker(config: Config, robot: Robot, auto_select: bool = False) -> Tracker:
+def create_tracker(
+    config: Config,
+    robot: Robot,
+    auto_select: bool = False,
+    calibration: Calibration | None = None,
+) -> Tracker:
     """Build a tracker without tracks from the configuration.
 
     Args:
-        config: Configuration. Camera poses are the nominal ones from the file.
-        robot: Robot description.
+        config: Configuration with the nominal camera poses.
+        robot: Robot description from the robot file.
         auto_select: Select the oldest confirmed track whenever none is selected.
+        calibration: Calibrated camera poses and robot position that replace the nominal
+            ones, or None to work with the nominal values.
 
     Returns:
         The tracker.
     """
+    cameras = tracking_cameras(config)
+    if calibration is not None:
+        cameras, robot = apply_calibration(cameras, robot, calibration)
     return Tracker(
-        tracking_cameras(config), config.arena, config.tracker, create_track_set(), robot,
+        cameras, config.arena, config.tracker, create_track_set(), robot, config.calibration,
         auto_select,
     )
+
+
+def check_markers(tracker: Tracker, frame: Frame) -> None:
+    """Correct every camera that sees the wall markers away from where they should be.
+
+    A correction is kept only if the new pose brings the marker error below the threshold.
+
+    Args:
+        tracker: Tracker; displaced cameras get a new pose and an entry in `corrections`.
+        frame: A frame; only cameras that reported enough markers in it are checked.
+    """
+    settings = tracker.calibration
+    positions_m = {marker.id: marker.position_m for marker in settings.markers}
+    for index, camera in enumerate(tracker.cameras):
+        seen = frame.markers.get(camera.id, ())
+        error_px, points_m, pixels_px = marker_error_px(camera, seen, positions_m)
+        if len(points_m) < settings.min_markers or error_px <= settings.marker_threshold_px:
+            continue
+        corrected = replace(camera, pose=solve_camera_pose(camera, points_m, pixels_px))
+        after_px = marker_error_px(corrected, seen, positions_m)[0]
+        # A new pose that still does not explain the markers (a wrong marker, a bad fit)
+        # is no improvement to rely on; the camera keeps its pose and is checked again.
+        if after_px > settings.marker_threshold_px:
+            continue
+        tracker.cameras[index] = corrected
+        tracker.corrections[camera.id] = {
+            "t": round(frame.t_s, SECOND_DECIMALS),
+            "error_px": round(error_px, PIXEL_DECIMALS),
+            "after_px": round(after_px, PIXEL_DECIMALS),
+        }
 
 
 def _rounded(values: np.ndarray, decimals: int) -> list[float]:
@@ -244,6 +297,7 @@ def process_frame(tracker: Tracker, frame: Frame) -> dict[str, Any]:
     if tracker.last_frame is not None and frame.frame < tracker.last_frame:
         _restart_tracks(tracker)
     tracker.last_frame = frame.frame
+    check_markers(tracker, frame)
     tracks = tracker.track_set
     predict_tracks(tracks, frame.t_s, tracker.settings)
     track_ids = np.array([track.id for track in tracks.tracks], dtype=int)
@@ -491,7 +545,10 @@ def tracks_message(
                 _snapshot_track(track, frame.t_s, lead_s) for track in tracker.track_set.tracks
             ],
             "detections": detections,
-            "health": _health(config, frame.t_s, last_report_s),
+            "health": {
+                **_health(config, frame.t_s, last_report_s),
+                "corrected_cameras": tracker.corrections,
+            },
             "robot": robot,
         },
         separators=(",", ":"),
@@ -746,6 +803,7 @@ def run(
     log_path: Path,
     duration_s: float | None,
     auto_select: bool,
+    calibration: Calibration | None = None,
 ) -> None:
     """Receive detections over UDP, write the track log, send `target`, serve the window.
 
@@ -756,13 +814,14 @@ def run(
         duration_s: Stop after the last frame before this simulation time (s), or None
             to run until interrupted.
         auto_select: Select the oldest confirmed track whenever none is selected.
+        calibration: Calibration to start from, or None for the nominal values.
     """
     rate_hz = frame_rate_hz(config)
     assembler = FrameAssembler(
         [camera.id for camera in config.cameras], config.tracker.frame_timeout_frames / rate_hz
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    tracker = create_tracker(config, robot, auto_select)
+    tracker = create_tracker(config, robot, auto_select, calibration)
     with (
         open(log_path, "w", encoding="utf-8") as log,
         socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as target_socket,
@@ -781,13 +840,20 @@ def main() -> None:
         action="store_true",
         help="select the oldest confirmed track whenever none is selected",
     )
+    parser.add_argument(
+        "--calibration",
+        type=Path,
+        default=None,
+        help="calibration file from tracker.wand_run (default: nominal poses of the config)",
+    )
     parser.add_argument("--log", type=Path, default=DEFAULT_LOG_PATH, help="track log file")
     parser.add_argument("--duration", type=float, default=None, help="simulation seconds")
     args = parser.parse_args()
+    calibration = None if args.calibration is None else load_calibration(args.calibration)
     try:
         run(
             load_config(args.config), load_robot(args.robot), args.log, args.duration,
-            args.auto_select,
+            args.auto_select, calibration,
         )
     except KeyboardInterrupt:
         pass
