@@ -123,6 +123,11 @@ The software under test. Knows nothing about the simulator.
 - Triangulation: pixels to rays, rays to candidate 3D points, ghost rejection.
 - Tracks: one Kalman filter per bee, assignment of points to tracks, track creation after a
   probation time, track removal after a time without support.
+- Input: both UDP sockets are read empty whenever they become readable. If the tracker has
+  fallen behind (busy computer) and more than `max_backlog_frames` frames are waiting, it
+  tracks only the newest and skips the rest; the tracks bridge the gap by prediction. The
+  number of skipped frames is shown in the control window. Without this the tracker stays
+  behind for ever once it is slower than the cameras, and every `target` is too old.
 - Output: `target` for the selected track after every frame (once a `robot_pose` has
   arrived), a log of all tracks for the metrics.
 - Input from the robot: `robot_pose`. The newest one gives `distance_m` and the list of
@@ -287,6 +292,7 @@ Tracker → page, at most 30 times per second of simulation time:
              "state": "flying", "confirmed": true, "cameras": 7}],
  "detections": {"cam-01": [[512.31, 300.87, 14.2, 4], [901.05, 644.4, 9.8, -1]]},
  "health": {"silent_nodes": ["node-03"], "camera_age_s": {"cam-01": 0.0},
+            "dropped_frames": 0,
             "corrected_cameras": {"cam-06": {"t": 12.0, "error_px": 15.2, "after_px": 0.6}}},
  "robot": {"rail_m": 0.392, "tilt_rad": 0.11, "focus_m": 0.215}}
 ```
@@ -300,6 +306,7 @@ Tracker → page, at most 30 times per second of simulation time:
 | `detections` | Per camera: `[u, v, size, track_id]`; `track_id` is -1 for a detection no track used |
 | `health.silent_nodes` | Nodes whose cameras have all been silent for `node_silent_after_s` |
 | `health.camera_age_s` | Simulation time since each camera last reported |
+| `health.dropped_frames` | Frames the tracker skipped because it had fallen behind |
 | `health.corrected_cameras` | Cameras the marker check found displaced: time of the last correction, mean marker error before and after it (px) |
 | `robot` | Axes of the newest `robot_pose`, or `null` before the first. The window draws the robot from these and from the robot file, never from the truth |
 

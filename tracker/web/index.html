@@ -68,6 +68,7 @@
       <tr><td>Time t</td><td id="st-t">-</td></tr>
       <tr><td>Frame</td><td id="st-frame">-</td></tr>
       <tr><td>Tracks</td><td id="st-tracks">-</td></tr>
+      <tr><td>Skipped frames</td><td id="st-dropped">-</td></tr>
     </table>
   </div>
 
@@ -463,6 +464,8 @@ function updateStatus(msg) {
   const confirmed = confirmedOf(msg.tracks).length;
   $("st-t").textContent = `${msg.t.toFixed(2)} s`;
   $("st-frame").textContent = String(msg.frame);
+  // Frames the tracker skipped because the computer was too busy to keep up.
+  $("st-dropped").textContent = String(msg.health.dropped_frames ?? 0);
   $("st-tracks").textContent = `${confirmed} confirmed / ${msg.tracks.length - confirmed} on probation`;
 }
 
