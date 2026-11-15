@@ -10,6 +10,11 @@ stage asks for it.
   late a backlog built up and every target was older than the timeout. It now reads all
   waiting targets before each frame (D80). With the page open in a software-rendering
   browser the robot had a target in 37 to 58 % of the snapshots before and in 100 % after.
+- Fixed: with a bee selected in the control window the robot moved for a second and then
+  stood still. On a busy computer the tracker needed longer than one frame period per
+  frame, fell behind without limit, and every `target` was older than the robot's timeout.
+  The tracker now reads its sockets empty and skips old frames when it is behind (D84),
+  and its filter is faster (D85). The control window shows "Skipped frames".
 - The robot model reports a build failure in the console instead of failing silently (D81).
 - Robot accent colour is teal instead of purple (D82).
 - Tracking cameras: rounded board, lens ring with raised barrel, ribbon cable with a bend,

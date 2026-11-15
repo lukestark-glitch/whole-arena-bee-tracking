@@ -85,6 +85,7 @@ DEFAULT_ROBOT_PATH = Path("config/robot.yaml")
 DEFAULT_LOG_PATH = Path("logs/tracks.jsonl")
 # Room for about one second of detections, so a short stall of the tracker loses nothing.
 RECEIVE_BUFFER_BYTES = 4 * 1024 * 1024
+MAX_DATAGRAM_BYTES = 65535
 # The state vector holds position, velocity and acceleration, three values each.
 _AXES = 3
 PAGE_PATH = Path(__file__).parent / "web" / "index.html"
@@ -116,6 +117,7 @@ class Tracker:
             runs without a control window.
         robot_pose: The newest `robot_pose`, or None before the first.
         calibration: Wall markers and the threshold of the marker check.
+        dropped_frames: Frames skipped because the tracker had fallen behind.
         corrections: Camera id to its last correction after a displacement: `t` (s),
             `error_px` before and `after_px` after the pose was re-estimated.
     """
@@ -127,6 +129,7 @@ class Tracker:
     robot: Robot
     calibration: CalibrationSettings
     auto_select: bool = False
+    dropped_frames: int = 0
     corrections: dict[str, dict[str, float]] = field(default_factory=dict)
     robot_pose: RobotPose | None = None
     selected_id: int | None = None
@@ -548,6 +551,7 @@ def tracks_message(
             "health": {
                 **_health(config, frame.t_s, last_report_s),
                 "corrected_cameras": tracker.corrections,
+                "dropped_frames": tracker.dropped_frames,
             },
             "robot": robot,
         },
@@ -681,47 +685,57 @@ def _resend_snapshot(session: _Session) -> None:
         broadcast(session.connections, _snapshot(session, session.last_handled))
 
 
-class _DetectionsProtocol(asyncio.DatagramProtocol):
-    """Receives detections datagrams on the event loop and tracks the frames in them."""
+def newest_frames(frames: list[Frame], max_backlog: int) -> list[Frame]:
+    """Pick the frames to track when several are waiting at once.
 
-    def __init__(self, session: _Session) -> None:
-        """Create the protocol.
+    Normally one frame is waiting. Several are waiting when the tracker has fallen behind
+    (a busy computer). Tracking them all would keep it behind for ever, and every `target`
+    would reach the robot too late; so only the newest are tracked. The tracks bridge the
+    skipped frames by prediction.
 
-        Args:
-            session: The running session.
-        """
-        self._session = session
+    Args:
+        frames: Waiting frames, oldest first.
+        max_backlog: Largest number of frames to track.
 
-    def datagram_received(self, data: bytes, addr: Any) -> None:
-        """Handle one datagram: assemble frames and track each released frame.
-
-        Args:
-            data: The datagram bytes.
-            addr: Sender address (unused).
-        """
-        for frame in frames_from_datagram(self._session.assembler, data):
-            _handle_frame(self._session, frame)
+    Returns:
+        The last `max_backlog` frames.
+    """
+    return frames[-max_backlog:]
 
 
-class _RobotPoseProtocol(asyncio.DatagramProtocol):
-    """Receives `robot_pose` datagrams on the event loop."""
+def _read_detections(session: _Session, sock: socket.socket) -> None:
+    """Read every waiting detections datagram and track the frames that are ready.
 
-    def __init__(self, session: _Session) -> None:
-        """Create the protocol.
+    Args:
+        session: The running session.
+        sock: Non-blocking detections socket that has become readable.
+    """
+    frames: list[Frame] = []
+    while True:
+        try:
+            datagram = sock.recv(MAX_DATAGRAM_BYTES)
+        except BlockingIOError:
+            break
+        frames.extend(frames_from_datagram(session.assembler, datagram))
+    kept = newest_frames(frames, session.config.tracker.max_backlog_frames)
+    session.tracker.dropped_frames += len(frames) - len(kept)
+    for frame in kept:
+        _handle_frame(session, frame)
 
-        Args:
-            session: The running session.
-        """
-        self._session = session
 
-    def datagram_received(self, data: bytes, addr: Any) -> None:
-        """Hand one datagram to the tracker.
+def _read_robot_poses(session: _Session, sock: socket.socket) -> None:
+    """Read every waiting `robot_pose` datagram; the tracker keeps the newest.
 
-        Args:
-            data: The datagram bytes.
-            addr: Sender address (unused).
-        """
-        apply_robot_pose(self._session.tracker, data)
+    Args:
+        session: The running session.
+        sock: Non-blocking `robot_pose` socket that has become readable.
+    """
+    while True:
+        try:
+            datagram = sock.recv(MAX_DATAGRAM_BYTES)
+        except BlockingIOError:
+            return
+        apply_robot_pose(session.tracker, datagram)
 
 
 async def _control_window(session: _Session, connection: ServerConnection) -> None:
@@ -759,11 +773,12 @@ def _receive_socket(port: int) -> socket.socket:
         port: UDP port to bind on the local host.
 
     Returns:
-        The bound socket with a large receive buffer.
+        The bound, non-blocking socket with a large receive buffer.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RECEIVE_BUFFER_BYTES)
     sock.bind((UDP_HOST, port))
+    sock.setblocking(False)
     return sock
 
 
@@ -774,14 +789,12 @@ async def _serve(session: _Session) -> None:
         session: The running session.
     """
     loop = asyncio.get_running_loop()
-    transport, _ = await loop.create_datagram_endpoint(
-        lambda: _DetectionsProtocol(session),
-        sock=_receive_socket(session.config.ports.detections),
-    )
-    pose_transport, _ = await loop.create_datagram_endpoint(
-        lambda: _RobotPoseProtocol(session),
-        sock=_receive_socket(session.config.ports.robot_pose),
-    )
+    # Both sockets are read empty whenever they become readable. Reading one datagram per
+    # turn of the event loop lets a backlog build up as soon as the tracker is short of time.
+    detections = _receive_socket(session.config.ports.detections)
+    poses = _receive_socket(session.config.ports.robot_pose)
+    loop.add_reader(detections, _read_detections, session, detections)
+    loop.add_reader(poses, _read_robot_poses, session, poses)
     try:
         async with serve(
             lambda connection: _control_window(session, connection),
@@ -793,8 +806,9 @@ async def _serve(session: _Session) -> None:
         ):
             await session.done.wait()
     finally:
-        transport.close()
-        pose_transport.close()
+        for sock in (detections, poses):
+            loop.remove_reader(sock)
+            sock.close()
 
 
 def run(

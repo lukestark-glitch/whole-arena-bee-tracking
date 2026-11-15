@@ -139,6 +139,8 @@ class TrackerSettings:
             window lies, in seconds.
         node_silent_after_s: A node counts as stopped when none of its cameras has
             reported for this long, in seconds of simulation time.
+        max_backlog_frames: When the tracker has fallen behind and more frames than this
+            are waiting, it skips the oldest ones and tracks only the newest.
     """
 
     frame_timeout_frames: float
@@ -160,10 +162,14 @@ class TrackerSettings:
     acceleration_smoothing_s: float
     prediction_lead_s: float
     node_silent_after_s: float
+    max_backlog_frames: int
 
 
 # Tracker settings that are whole numbers; all others are floats.
-_TRACKER_INT_FIELDS = ("min_cameras", "min_cameras_tracked", "confirm_frames", "max_missed_frames")
+_TRACKER_INT_FIELDS = (
+    "min_cameras", "min_cameras_tracked", "confirm_frames", "max_missed_frames",
+    "max_backlog_frames",
+)
 
 
 @dataclass(frozen=True)
