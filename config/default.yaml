@@ -103,7 +103,8 @@ nodes:
   - id: node-08
     cameras: [cam-15, cam-16]
 
-# Detection noise and node latency applied by the simulator.
+# Detection noise and node latency applied by the simulator. These are the realistic
+# defaults of docs/camera-node.md, not loosened for viewing; not yet measured on hardware.
 noise:
   pixel_sigma_px: 0.5             # Gaussian image noise per axis
   dropout_probability: 0.02       # chance a visible bee is missed in a frame

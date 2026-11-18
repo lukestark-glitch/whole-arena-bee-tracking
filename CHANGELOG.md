@@ -3,6 +3,47 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-18: Realistic values, measured
+
+- `config/robot.yaml`: the cinema field of view (0.096 rad, 24 mm wide at 0.25 m) and depth
+  of field (2 mm) are back at the Stage 5 values; they are realistic, not widened for
+  viewing. The unknown limits take the cautious end of a NEMA 23 drive: rail 10 m/s²
+  (was 15), tilt 8 rad/s and 50 rad/s² (was 12 and 90), focus 0.5 m/s and 10 m/s² (was 1
+  and 20). The rail stays at 3 m/s, now tagged `stated`. Every other robot value stays
+  `assumed` with its derivation (D92).
+- `config/default.yaml`: no value changed. Noise, dropout, node delay, frame rate, bee size,
+  speed and count already were the documented values of `docs/camera-node.md` and the
+  concept paper; the noise section now says so. The config has no trigger jitter.
+- No Stage 7 experiment command exists yet, so only the robot was re-measured.
+
+**Robot result** (60 s, 10 bees, seed 1, tracker with `--auto-select`). The robot numbers
+depend on assumed robot values (limits, field of view, depth of field) and change when
+Jeremy gives real ones. "One process" is the deterministic set-up of
+`tests/test_robot_loop.py`. "Real time" is the three-program command of `docs/setup.md`,
+which varies from run to run.
+
+| Flight model | Robot values | Time in frame, one process | Time in focus, one process | Time in frame, real time | Time in focus, real time |
+| --- | --- | --- | --- | --- | --- |
+| random | before (widened view, faster limits) | 80.7 % | 41.1 % | 75.5 % | 40.2 % |
+| random | after (realistic) | 52.1 % | 30.8 % | 48.5 % | 30.3 % |
+| random | new limits, old widened view | 65.3 % | 35.8 % | | |
+| trips | before | 99.0 % | 92.2 % | 98.9 % | 92.2 % |
+| trips | after | 97.1 % | 73.9 % | 96.9 % | 71.3 % |
+| trips | new limits, old widened view | 98.4 % | 91.5 % | | |
+
+With random flight the slower limits cost about 15 points of time in frame and the narrower
+picture about 13 more. With trips the selected bee spends much of the time feeding or
+resting, so it stays framed; the 2 mm depth of field costs about 18 points in focus.
+
+**Tracking result** (same real-time runs; does not depend on the robot values):
+
+| Flight model | Mean error | 95th percentile | ID swaps | Ghost tracks |
+| --- | --- | --- | --- | --- |
+| random | 0.44 mm | 1.11 mm | 23 | 0 |
+| trips | 0.55 mm | 1.30 mm | 60 | 1 |
+
+Trips raise the ID swaps, as the plan expected from bees crowding at feeder and entrance.
+
 ## 2026-11-18: Flight behaviour models
 
 - New flight model `trips` (`bees.flight_model` in `config/default.yaml`, default stays
