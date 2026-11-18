@@ -43,6 +43,7 @@ that real camera nodes and a real robot would use.
 
 | File | Content |
 | --- | --- |
+| [`docs/results-paper.pdf`](docs/results-paper.pdf) | Results paper: what was built, how to use it, all experiment results ([HTML](docs/results-paper.html)) |
 | [`docs/concept-paper.md`](docs/concept-paper.md) | The idea, the problems it targets, the system design ([PDF](docs/concept-paper.pdf)) |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | Stages with tasks and acceptance criteria |
 | [`docs/architecture.md`](docs/architecture.md) | Components and how they communicate |
