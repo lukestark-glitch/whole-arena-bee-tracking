@@ -19,11 +19,11 @@ Each package gets a section. Each module gets one row.
 
 | Module | Purpose | Public functions and classes | Used by |
 | --- | --- | --- | --- |
-| `shared/config.py` | Load and validate `config/*.yaml` into dataclasses | `load_config`, `load_robot`, `frame_rate_hz`, `last_frame_of`, `ConfigError`, `Config`, `Arena`, `CameraModel`, `Camera`, `Node`, `Noise`, `Bees`, `TrackerSettings`, `Ports`, `Robot`, `AxisLimits`, `Cinema`, `StereoCamera`, `RobotControl`, `CalibrationSettings`, `Marker` | simulator, robot_emulator, tracker, experiments |
+| `shared/config.py` | Load and validate `config/*.yaml` into dataclasses | `load_config`, `load_robot`, `frame_rate_hz`, `last_frame_of`, `ConfigError`, `Config`, `Arena`, `CameraModel`, `Camera`, `Node`, `Noise`, `Bees`, `Trips`, `FLIGHT_MODELS`, `RANDOM_FLIGHT`, `TRIPS_FLIGHT`, `on_wall`, `TrackerSettings`, `Ports`, `Robot`, `AxisLimits`, `Cinema`, `StereoCamera`, `RobotControl`, `CalibrationSettings`, `Marker` | simulator, robot_emulator, tracker, experiments |
 | `shared/protocol.py` | Build and parse the UDP messages of `docs/protocol.md` | `encode_detections`, `encode_target`, `encode_robot_pose`, `encode_truth`, `decode`, `ProtocolError`, `Detections`, `Target`, `OtherBee`, `RobotPose`, `Truth`, `TruthBee`, `RobotAxes`, `UDP_HOST` | simulator, tracker, experiments |
 | `shared/wand.py` | Schedule of the calibration wand run: reference points, sweep, stop points | `wand_phase`, `wand_duration_s`, `REFERENCE`, `SWEEP`, `STOP`, `DONE` | simulator, tracker |
 | `shared/web.py` | Serve a window's page and the shared files on the port of its WebSocket | `page_response` | simulator, tracker |
-| `shared/web/models.js` | 3D models of both windows: bee, robot, arena, tracking camera (Raspberry Pi camera module with status LED) and the camera id labels; merged geometry, shared materials | `createBee`, `poseBee`, `wingPhase`, `buildRobotModel`, `poseRobotModel`, `buildArenaModel`, `createCameraModel`, `setCameraRunning`, `createCameraLabels`, `placeCameraLabels` | both pages |
+| `shared/web/models.js` | 3D models of both windows: bee, robot, arena, tracking camera (Raspberry Pi camera module with status LED), the camera id labels, and feeder, entrance and light of the trips model; merged geometry, shared materials | `createBee`, `poseBee`, `wingPhase`, `buildRobotModel`, `poseRobotModel`, `buildArenaModel`, `createCameraModel`, `setCameraRunning`, `createCameraLabels`, `placeCameraLabels`, `buildFeeder`, `buildEntrance`, `buildLight` | both pages |
 | `shared/web/style.css` | Colours, panel, cards, buttons, sliders and switches of both windows | - | both pages |
 | `shared/geometry.py` | Equidistant fisheye camera model: pose, projection, rays, visibility. Pose of the robot's cameras from its axes, and what the cinema camera frames | `camera_pose`, `focal_length_px`, `project`, `pixel_to_ray`, `is_visible`, `robot_camera_pose`, `cinema_view`, `CameraPose` | simulator, robot_emulator, tracker, experiments |
 
@@ -41,7 +41,7 @@ Each package gets a section. Each module gets one row.
 | `tests/test_config.py` | The default config and the robot file load; each validation rule fails with a clear message |
 | `tests/test_protocol.py` | Round trip of every message type, rounding, splitting at 1400 bytes, decode errors |
 | `tests/test_geometry.py` | Pixel-to-ray round trip below 1e-6 m at 1 m, image orientation, visibility |
-| `tests/test_bees.py` | Bees stay in the arena for 60 s, speed limit, surface states, same seed gives same run |
+| `tests/test_bees.py` | Bees stay in the arena for 60 s, speed limit, surface states, same seed gives same run; trips bees feed and rest in turn, fly mostly along x, reach a moved feeder |
 | `tests/test_cameras.py` | Projection without noise, blob size, merging of overlapping blobs, dropout, noise level |
 | `tests/test_nodes.py` | Shared node delay, message content, empty cameras still report |
 | `tests/test_simulator.py` | Identical output for the same seed and controls, every control, 16 detections and 1 truth per frame, UDP end to end |
@@ -65,7 +65,7 @@ Each package gets a section. Each module gets one row.
 
 | Module | Purpose | Public functions and classes | Used by |
 | --- | --- | --- | --- |
-| `simulator/bees.py` | Bee motion: sitting, walking, flying, one step per frame | `create_bees`, `create_bee`, `step_bees`, `Bee`, `SITTING`, `WALKING`, `FLYING` | `simulator/main.py`, `simulator/cameras.py` |
+| `simulator/bees.py` | Bee motion: sitting, walking, flying, one step per frame; random flight or trips between entrance and feeder, drawn by the light | `create_bees`, `create_bee`, `step_bees`, `Bee`, `Trip`, `SITTING`, `WALKING`, `FLYING`, `TO_FEEDER`, `FEEDING`, `TO_ENTRANCE`, `RESTING` | `simulator/main.py`, `simulator/cameras.py` |
 | `simulator/cameras.py` | What one virtual camera reports for a frame: visible bees, overlapping blobs merged, with noise, dropout and blob size | `observe_bees` | `simulator/main.py` |
 | `simulator/wand.py` | Calibration tools of the simulator: wand position during a wand run, deliberate camera error, what a camera sees of the wall markers | `wand_position`, `sweep_point`, `stop_points`, `perturb_pose`, `observe_markers` | `simulator/main.py` |
 | `simulator/nodes.py` | Camera node: one shared delay for its two cameras, builds the `detections` datagrams with bees and markers | `node_messages`, `Outgoing` | `simulator/main.py` |

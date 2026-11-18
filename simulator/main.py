@@ -43,7 +43,15 @@ from robot_emulator.controller import (
 )
 from robot_emulator.motion import step_axis
 from robot_emulator.stereo import observe_stereo
-from shared.config import Config, Robot, frame_rate_hz, load_config, load_robot
+from shared.config import (
+    FLIGHT_MODELS,
+    Config,
+    Robot,
+    frame_rate_hz,
+    load_config,
+    load_robot,
+    on_wall,
+)
 from shared.geometry import CameraPose, camera_pose, robot_camera_pose
 from shared.protocol import (
     UDP_HOST,
@@ -79,6 +87,9 @@ TIME_DECIMALS = 6
 # (too many bees, a time scale near zero) or from producing numbers JSON cannot carry.
 MAX_BEE_COUNT = 200
 MAX_SPEED_LIMIT_M_S = 20.0
+# Strongest light pull the page may set; well above the default 0.3 m/s^2, at which bees
+# already drift towards the lit end.
+MAX_LIGHT_STRENGTH_M_S2 = 5.0
 MIN_TIME_SCALE = 0.01
 MAX_TIME_SCALE = 100.0
 # Seeds are kept to 32 bits so that every browser and JSON parser carries them exactly.
@@ -514,6 +525,72 @@ def _set_max_speed(simulation: Simulation, value: object) -> None:
     )
 
 
+def _set_flight_model(simulation: Simulation, value: object) -> None:
+    """Switch the bee flight model and restart with the same seed (D90).
+
+    Args:
+        simulation: Simulation, modified in place.
+        value: One of FLIGHT_MODELS.
+
+    Raises:
+        ValueError: If the value is not a known flight model.
+    """
+    if value not in FLIGHT_MODELS:
+        raise ValueError(f"flight_model must be one of {FLIGHT_MODELS}, got {value!r}")
+    config = simulation.config
+    simulation.config = replace(config, bees=replace(config.bees, flight_model=value))
+    _restart(simulation, simulation.seed)
+
+
+def _set_trips(simulation: Simulation, **changes: object) -> None:
+    """Replace fields of the trip settings.
+
+    Args:
+        simulation: Simulation, modified in place.
+        **changes: Fields of `Trips` and their new, already checked values.
+    """
+    bees = simulation.config.bees
+    simulation.config = replace(
+        simulation.config, bees=replace(bees, trips=replace(bees.trips, **changes))
+    )
+
+
+def _set_feeder(simulation: Simulation, value: object) -> None:
+    """Move the feeder of the trips model; bees on their way re-aim at once.
+
+    Args:
+        simulation: Simulation, modified in place.
+        value: New position `[x, y, z]`, arena frame, metres, on a wall of the arena.
+
+    Raises:
+        ValueError: If the value is not three numbers on a wall of the arena.
+    """
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(f"feeder_m must be a list of three numbers, got {value!r}")
+    position_m = tuple(_number("feeder_m", x) for x in value)
+    if not on_wall(position_m, simulation.config.arena):
+        raise ValueError(f"feeder_m must lie on a wall of the arena, got {value!r}")
+    _set_trips(simulation, feeder_m=position_m)
+
+
+def _set_light_strength(simulation: Simulation, value: object) -> None:
+    """Set the light pull of the trips model (m/s^2, 0 to MAX_LIGHT_STRENGTH_M_S2).
+
+    Args:
+        simulation: Simulation, modified in place.
+        value: New strength; 0 switches the light off.
+
+    Raises:
+        ValueError: If the value is not a number in that range.
+    """
+    strength_m_s2 = _number("light_strength_m_s2", value)
+    if not 0.0 <= strength_m_s2 <= MAX_LIGHT_STRENGTH_M_S2:
+        raise ValueError(
+            f"light_strength_m_s2 must be from 0 to {MAX_LIGHT_STRENGTH_M_S2}, got {value!r}"
+        )
+    _set_trips(simulation, light_strength_m_s2=strength_m_s2)
+
+
 def _set_pixel_sigma(simulation: Simulation, value: object) -> None:
     """Set the detection pixel noise (px, >= 0).
 
@@ -692,6 +769,9 @@ def _robot_limit_setter(name: str) -> Callable[[Simulation, object], None]:
 _CONTROLS: dict[str, Callable[[Simulation, object], None]] = {
     "bee_count": _set_bee_count,
     "max_speed_m_s": _set_max_speed,
+    "flight_model": _set_flight_model,
+    "feeder_m": _set_feeder,
+    "light_strength_m_s2": _set_light_strength,
     "pixel_sigma_px": _set_pixel_sigma,
     "dropout_probability": _set_dropout,
     "paused": _set_paused,
@@ -708,8 +788,8 @@ def apply_control(simulation: Simulation, name: str, value: object) -> None:
 
     Args:
         simulation: Simulation, modified in place. Call only between frames.
-        name: Control name: bee_count, max_speed_m_s, pixel_sigma_px,
-            dropout_probability, paused, time_scale, seed, node_stopped,
+        name: Control name: bee_count, max_speed_m_s, flight_model, feeder_m,
+            light_strength_m_s2, pixel_sigma_px, dropout_probability, paused, time_scale, seed, node_stopped,
             camera_displaced or one of ROBOT_LIMIT_CONTROLS.
         value: New value; its type and range depend on the control.
 
@@ -784,6 +864,11 @@ def state_message(simulation: Simulation) -> str:
         "settings": {
             "bee_count": config.bees.count,
             "max_speed_m_s": config.bees.max_speed_m_s,
+            "flight_model": config.bees.flight_model,
+            "feeder_m": list(config.bees.trips.feeder_m),
+            "entrance_m": list(config.bees.trips.entrance_m),
+            "light_direction": list(config.bees.trips.light_direction),
+            "light_strength_m_s2": config.bees.trips.light_strength_m_s2,
             "pixel_sigma_px": config.noise.pixel_sigma_px,
             "dropout_probability": config.noise.dropout_probability,
             **{

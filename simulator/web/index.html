@@ -82,6 +82,34 @@
   </div>
 
   <div class="card">
+  <h2>Flight</h2>
+  <div class="row">
+    <label for="flight_model">Flight model</label>
+    <select id="flight_model">
+      <option value="random">Random</option>
+      <option value="trips">Trips to the feeder, drawn by light</option>
+    </select>
+  </div>
+  <div class="row"><label for="light_strength_m_s2">Light <span class="val" id="v-light_strength_m_s2"></span></label>
+    <input type="range" id="light_strength_m_s2" min="0" max="2" step="0.05"></div>
+  <div class="row">
+    <label for="feeder_wall">Feeder wall</label>
+    <select id="feeder_wall">
+      <option value="0:0">left end (x = 0)</option>
+      <option value="0:1">right end (x = max)</option>
+      <option value="1:0">front (y = 0)</option>
+      <option value="1:1">back (y = max)</option>
+      <option value="2:0">floor (z = 0)</option>
+      <option value="2:1">ceiling (z = max)</option>
+    </select>
+  </div>
+  <div class="row"><label for="feeder_u">Feeder <span id="n-feeder_u"></span> <span class="val" id="v-feeder_u"></span></label>
+    <input type="range" id="feeder_u" min="0" max="1" step="0.01"></div>
+  <div class="row"><label for="feeder_v">Feeder <span id="n-feeder_v"></span> <span class="val" id="v-feeder_v"></span></label>
+    <input type="range" id="feeder_v" min="0" max="1" step="0.01"></div>
+  </div>
+
+  <div class="card">
   <h2>Camera nodes</h2>
   <div class="row nodes" id="nodes"></div>
   </div>
@@ -115,7 +143,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { createBee, poseBee, wingPhase, buildRobotModel, poseRobotModel, buildArenaModel,
-         createCameraModel, setCameraRunning, createCameraLabels, placeCameraLabels } from "/models.js";
+         createCameraModel, setCameraRunning, createCameraLabels, placeCameraLabels,
+         buildFeeder, buildEntrance, buildLight } from "/models.js";
 
 // ---- constants ----
 const RECONNECT_DELAY_MS = 1000;
@@ -128,8 +157,11 @@ const STOPPED_CAMERA_COLOR = 0xdc2626;
 const DEFAULT_ARENA_M = [0.9, 0.3, 0.3];
 const ROBOT_LIMIT_NAMES = ["rail_max_speed_m_s", "rail_max_acceleration_m_s2",
                            "tilt_max_speed_rad_s", "tilt_max_acceleration_rad_s2"];
-const CONTROL_NAMES = ["bee_count", "max_speed_m_s", "pixel_sigma_px",
+const CONTROL_NAMES = ["bee_count", "max_speed_m_s", "light_strength_m_s2", "pixel_sigma_px",
                        "dropout_probability", "time_scale", ...ROBOT_LIMIT_NAMES];
+const AXIS_NAMES = ["x", "y", "z"];
+const WALL_LIFT_M = 0.002;             // feeder and entrance sit this far off the wall, display only
+const TRIPS = "trips";
 const CINEMA_SEND_INTERVAL_MS = 66;    // about 15 images per second to the control window
 const CINEMA_JPEG_QUALITY = 0.7;
 const CINEMA_BACKGROUND = "#dfe7d8";
@@ -158,6 +190,15 @@ let robotModel = null;         // parts of the robot model that move
 let bodyLengthM = 0.015;       // bee body length from the scene message
 let cameraLabels = [];         // id labels of the tracking cameras
 
+// Feeder, entrance and light of the trips flight model, shown only with that model.
+const tripsGroup = new THREE.Group();
+const feederModel = buildFeeder();
+const entranceModel = buildEntrance();
+let lightModel = null;
+let lightKey = "";             // direction and arena size the light was built for
+tripsGroup.add(feederModel, entranceModel);
+scene.add(tripsGroup);
+
 const beeMeshes = new Map();   // bee id -> bee model
 
 let arenaSize = DEFAULT_ARENA_M;
@@ -179,6 +220,85 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+}
+
+// The wall a point lies on: [axis, side], side 0 at coordinate 0 and 1 at the box size.
+function wallOf(pos, size) {
+  for (let a = 0; a < 3; a++) {
+    if (pos[a] === 0) return [a, 0];
+    if (pos[a] === size[a]) return [a, 1];
+  }
+  return [2, 0];
+}
+
+// The two axes that span a wall perpendicular to `axis`.
+function inPlane(axis) {
+  return [0, 1, 2].filter(a => a !== axis);
+}
+
+// Put a model built facing +z onto a wall point, facing into the arena.
+function placeOnWall(model, pos) {
+  const [axis, side] = wallOf(pos, arenaSize);
+  const normal = new THREE.Vector3();
+  normal.setComponent(axis, side === 0 ? 1 : -1);
+  model.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+  model.position.set(...pos).addScaledVector(normal, WALL_LIFT_M);
+}
+
+// Show feeder, entrance and light with the trips model; rebuild the light when it moved.
+function updateTrips(settings) {
+  if (settings.flight_model === undefined) return;
+  tripsGroup.visible = settings.flight_model === TRIPS;
+  placeOnWall(feederModel, settings.feeder_m);
+  placeOnWall(entranceModel, settings.entrance_m);
+  const key = JSON.stringify([settings.light_direction, arenaSize]);
+  if (key !== lightKey) {
+    if (lightModel) { tripsGroup.remove(lightModel); clearGroup(lightModel); }
+    lightModel = buildLight(arenaSize, settings.light_direction);
+    tripsGroup.add(lightModel);
+    lightKey = key;
+  }
+  lightModel.visible = settings.light_strength_m_s2 > 0;
+}
+
+// Feeder position from the wall selector and the two sliders (fractions of the wall).
+function feederFromWidgets() {
+  const [axis, side] = $("feeder_wall").value.split(":").map(Number);
+  const pos = [0, 0, 0];
+  pos[axis] = side === 0 ? 0 : arenaSize[axis];
+  const [u, v] = inPlane(axis);
+  // Millimetres are enough and keep the numbers short.
+  pos[u] = Math.round(parseFloat($("feeder_u").value) * arenaSize[u] * 1000) / 1000;
+  pos[v] = Math.round(parseFloat($("feeder_v").value) * arenaSize[v] * 1000) / 1000;
+  return pos;
+}
+
+// Name the feeder sliders after the wall's axes and show the position in metres.
+function labelFeeder(pos) {
+  const [axis] = wallOf(pos, arenaSize);
+  const [u, v] = inPlane(axis);
+  $("n-feeder_u").textContent = AXIS_NAMES[u];
+  $("n-feeder_v").textContent = AXIS_NAMES[v];
+  $("v-feeder_u").textContent = `${pos[u].toFixed(3)} m`;
+  $("v-feeder_v").textContent = `${pos[v].toFixed(3)} m`;
+}
+
+// Show the flight settings in the Flight card; the trip widgets work only with trips.
+function updateFlightPanel(settings) {
+  if (settings.flight_model === undefined) return;
+  setWidget("flight_model", settings.flight_model);
+  const pos = settings.feeder_m;
+  const [axis, side] = wallOf(pos, arenaSize);
+  const [u, v] = inPlane(axis);
+  const busy = ["feeder_wall", "feeder_u", "feeder_v"].some(id => activeWidgets.has(id) || document.activeElement === $(id));
+  if (!busy) {
+    $("feeder_wall").value = `${axis}:${side}`;
+    $("feeder_u").value = pos[u] / arenaSize[u];
+    $("feeder_v").value = pos[v] / arenaSize[v];
+    labelFeeder(pos);
+  }
+  const off = settings.flight_model !== TRIPS;
+  for (const id of ["light_strength_m_s2", "feeder_wall", "feeder_u", "feeder_v"]) $(id).disabled = off;
 }
 
 // Remove and dispose all children of a group.
@@ -374,6 +494,7 @@ const activeWidgets = new Set();   // widget ids the user is currently dragging 
 function formatValue(name, v) {
   switch (name) {
     case "max_speed_m_s": return `${v.toFixed(1)} m/s`;
+    case "light_strength_m_s2": return v === 0 ? "off" : `${v.toFixed(2)} m/s²`;
     case "pixel_sigma_px": return `${v.toFixed(1)} px`;
     case "dropout_probability": return `${(v * 100).toFixed(0)} %`;
     case "time_scale": return `${v.toFixed(1)}x`;
@@ -407,6 +528,7 @@ function updatePanel(msg) {
     if ($(`v-${name}`)) $(`v-${name}`).textContent = formatValue(name, v);
   }
   if (msg.settings.bee_count !== undefined) setWidget("bee_count_num", msg.settings.bee_count);
+  updateFlightPanel(msg.settings);
   setWidget("seed", msg.seed);
   $("paused").textContent = msg.paused ? "Resume" : "Pause";
   $("ro-mode").textContent = (msg.wand ? "wand run" : "bees") +
@@ -442,7 +564,7 @@ function connect() {
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg.type === "scene") handleScene(msg);
     else if (msg.type === "state") {
-      lastState = msg; updatePanel(msg); updateBees(msg.bees);
+      lastState = msg; updatePanel(msg); updateTrips(msg.settings); updateBees(msg.bees);
       updateRobot(msg.robot); drawCinema(msg);
     }
   };
@@ -465,6 +587,21 @@ function wireSlider(name, parse) {
 function wireControls() {
   wireSlider("bee_count", v => parseInt(v, 10));
   wireSlider("max_speed_m_s", parseFloat);
+  wireSlider("light_strength_m_s2", parseFloat);
+  // A new flight model restarts the run with the same seed.
+  $("flight_model").addEventListener("change", () => sendControl("flight_model", $("flight_model").value));
+  for (const id of ["feeder_u", "feeder_v"]) {
+    const el = $(id);
+    el.addEventListener("pointerdown", () => activeWidgets.add(id));
+    el.addEventListener("pointerup", () => activeWidgets.delete(id));
+    el.addEventListener("pointercancel", () => activeWidgets.delete(id));
+    el.addEventListener("input", () => { const pos = feederFromWidgets(); labelFeeder(pos); sendControl("feeder_m", pos); });
+  }
+  $("feeder_wall").addEventListener("change", () => {
+    const pos = feederFromWidgets();
+    labelFeeder(pos);
+    sendControl("feeder_m", pos);
+  });
   wireSlider("pixel_sigma_px", parseFloat);
   wireSlider("dropout_probability", parseFloat);
   wireSlider("time_scale", parseFloat);
