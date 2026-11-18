@@ -286,7 +286,8 @@ measured against the truth.
 - Batch runner: run a list of configurations without windows and collect the metrics in
   one table (CSV).
 - Experiment configurations: 8, 12 and 16 cameras; 5, 10, 20 and 40 bees; one node failed;
-  node delay of 5, 15 and 30 ms.
+  node delay of 5, 15 and 30 ms. If the flight behaviour model below exists, the same
+  configurations also with `flight_model: trips`.
 - Arena from a triangle mesh (STL file) and an occlusion test (ray against mesh) in the
   visibility check. Needs the `trimesh` dependency: record the decision first.
 - `docs/results.md`: the tables with a short reading of each.
@@ -296,6 +297,92 @@ measured against the truth.
 - One command reproduces every table in `docs/results.md`.
 - A non-box arena loads and bees hidden behind a wall are not detected by the blocked
   cameras.
+
+---
+
+## Flight behaviour models (optional, not a numbered stage yet)
+
+**Goal.** A second bee motion model that flies the way bees in Jeremy Fielding's arena
+probably fly. Stage 7 then compares tracking with the current random model on the same
+seed.
+
+**Background** (from Jeremy Fielding's "Engineer vs Bee" video, paraphrased):
+
+- Bumblebees fly towards light and keep bumping against a glass ceiling. With the cage lit
+  from the sides they fly fairly straight (about 42:56 to 43:10).
+- The colony is connected to the flight chamber and the bees are trained to find nectar, so
+  they fly back and forth through the space (about 28:46 to 29:03).
+- Jeremy wants to limit the flight space, because a smaller space makes the depth of field
+  easier (about 8:36 to 8:52).
+- **Assumption (Luke, not from the video):** with the light along the arena, the nectar is
+  at the lit end (`x = 0`) and the colony entrance at the other end (`x` = arena length).
+  Bees then fly mostly along `x`, in trips from one end to the other.
+
+**Build**
+
+- Config: `bees.flight_model` is `random` (today's model, the default, so existing results
+  stay the same) or `trips`. A `bees.trips` block holds every parameter of the new model:
+  light direction (unit vector, arena frame) and strength (an acceleration in m/s² towards
+  the light), feeder position, entrance position, lateral and vertical spread of the flight
+  lane (m), speed range of a trip (m/s), mean dwell time at the feeder (s), mean rest time
+  near the entrance (s). Read and checked in `shared/config.py` (`Bees`, its parse
+  function, `load_config()`) and set in `config/default.yaml` (D87).
+- Trip logic in `simulator/bees.py` as a small state machine per bee (D88): rest near the
+  entrance → fly to the feeder → feed (sit or walk on the feeder wall) → fly back along the
+  arena → rest near the entrance → repeat. Arrival means landing on the end wall. Sitting
+  and walking stay on box walls as today. Functions that change:
+  - `Bee`: a trip phase and the time left in it.
+  - `create_bee()`, `create_bees()`: with `trips`, bees start resting at the entrance with
+    staggered rest times.
+  - `step_bees()`: picks the step by `flight_model`.
+  - `_step_flying()`: the velocity relaxes towards a desired velocity instead of zero (D89),
+    plus the light pull. With `random` the desired velocity is zero and the pull is off.
+  - `_handle_walls()`, `_land()`: an end wall in the trip's direction ends the flight; other
+    walls bounce.
+  - `_step_sitting()`, `_step_walking()`, `_take_off()`: with `trips`, take-off follows the
+    phase timer and the bee heads for the other end.
+  - `simulator/main.py`: `create_simulation()`, `step_simulation()` and `_set_bee_count()`
+    keep their signatures and pass the settings on.
+- Tests in `tests/test_bees.py` and `tests/test_config.py`: `random` gives the same bees as
+  before for a fixed seed; with `trips`, bees reach the feeder and the entrance in turn, fly
+  mostly along `x`, stay inside the arena and under the speed limit; a bad `trips` block
+  raises `ConfigError`.
+- Later, not part of this section: a flight model selector in the simulator window.
+
+**Effects on tracking, to be measured in Stage 7** (same seed, `random` against `trips`):
+
+- Straighter paths suit the constant-acceleration filter, but the turns at both ends are
+  hard accelerations.
+- Bees in one lane can line up along camera rays, which raises the risk of ghost points.
+- Bees crowd at the feeder and the entrance, which stresses ID keeping and the hand-off to
+  the robot.
+- Numbers: ID swaps and ghost tracks (`experiments/metrics.py`), time in frame and in focus
+  (robot metrics), and the prediction error of the target (not measured yet, see Open
+  questions).
+
+**Done when**
+
+- With `flight_model: random` every existing test passes unchanged and a fixed seed gives
+  the same `truth` as before.
+- With `flight_model: trips` a 60 s run shows bees flying between feeder and entrance, and
+  the Stage 7 batch runner reports the metrics above for both models.
+
+Real flight must be measured from Jeremy's footage once it is available; then the model is
+tuned or replaced.
+
+---
+
+## Open questions
+
+- Flight behaviour: the nectar and entrance positions are Luke's assumption. Defaults put
+  the feeder at `x = 0` and the entrance at `x` = arena length, both mid-height on the end
+  walls, until the footage shows the real layout.
+- Flight behaviour: bees do not leave the arena through the entrance; they rest near it and
+  the bee count stays constant (D88). Letting them leave would change the number of bees in
+  `truth` during a run.
+- Flight behaviour: the prediction error of the target is not a metric yet. Stage 7 adds it
+  to `experiments/metrics.py` (prediction one frame ahead against the truth) if the
+  comparison needs it.
 
 ---
 
