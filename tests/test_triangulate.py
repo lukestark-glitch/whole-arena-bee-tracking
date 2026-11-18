@@ -43,6 +43,7 @@ SETTINGS = TrackerSettings(
     acceleration_smoothing_s=0.2,
     prediction_lead_s=0.1,
     node_silent_after_s=0.5,
+    max_backlog_frames=2,
 )
 CENTRE = (0.45, 0.15, 0.15)
 

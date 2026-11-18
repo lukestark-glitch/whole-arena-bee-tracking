@@ -16,8 +16,14 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 function mergeParts(geometries) {
   const flat = geometries.map(g => (g.index ? g.toNonIndexed() : g));
   const merged = mergeGeometries(flat);
+  if (!merged) {
+    // Name the cause, so a model that cannot be built never fails silently.
+    const attributes = flat.map(g => Object.keys(g.attributes).sort().join("+"));
+    const message = `models.js: parts cannot be merged, their attributes differ: ${[...new Set(attributes)].join(" | ")}`;
+    console.error(message);
+    throw new Error(message);
+  }
   new Set([...geometries, ...flat]).forEach(g => g.dispose());
-  if (!merged) throw new Error("models.js: parts with different attributes cannot be merged");
   return merged;
 }
 
@@ -203,14 +209,17 @@ export function wingPhase(id, nowMs) {
 // Camera robot: a belt-driven linear rail, a carriage with a yoke, and a tilting head with a
 // cinema camera, a macro lens, a stereo pair on top, and NEMA 23 stepper motors with gear
 // boxes for the tilt and the focus ring. The carriage origin is the tilt axis.
+const ROBOT_ACCENT = 0x14958f;
 const ROBOT_MATERIALS = {
   silver: new THREE.MeshStandardMaterial({ color: 0xb9c0c8, metalness: 0.55, roughness: 0.45 }),
   black: new THREE.MeshStandardMaterial({ color: 0x262b31, metalness: 0.2, roughness: 0.6 }),
   grey: new THREE.MeshStandardMaterial({ color: 0x59616b, metalness: 0.3, roughness: 0.5 }),
-  accent: new THREE.MeshStandardMaterial({ color: 0x8b5cf6, metalness: 0.1, roughness: 0.55 }),
+  // The one accent colour of the robot (plate, yoke, sight line): anodised teal, which
+  // stands out against the warm colours of bees, arena and panels.
+  accent: new THREE.MeshStandardMaterial({ color: ROBOT_ACCENT, metalness: 0.45, roughness: 0.4 }),
   glass: new THREE.MeshStandardMaterial({ color: 0x10202e, metalness: 0.6, roughness: 0.1 }),
 };
-const SIGHT_COLOR = 0x8b5cf6;
+const SIGHT_COLOR = ROBOT_ACCENT;
 const RAIL_PROFILE_M = [0.03, 0.022];          // width (y) and height (z) of the aluminium profile
 const PLATE_SIZE_M = [0.09, 0.07, 0.008];
 const YOKE_HEIGHT_M = 0.05;                    // tilt axis above the plate
@@ -374,36 +383,93 @@ function boxEdges([sx, sy, sz]) {
 }
 
 // ---- tracking camera ----
-// A Raspberry Pi camera module: green board, black sensor module with a round lens, a short
-// ribbon cable and a status LED. Built with the lens along +y (the view axis) and the board
-// in the x-z plane. Display only; a real module is 25 x 24 mm.
+// A Raspberry Pi camera module on a slim bracket: rounded green board, black sensor module
+// with a lens ring and a raised barrel, a ribbon cable that bends away behind the board,
+// and a status LED. Built with the lens along +y (the view axis) and the board in the x-z
+// plane, its centre at the origin. Display only; a real module is 25 x 24 mm.
 const PI_BOARD_M = [0.025, 0.0016, 0.024];     // width (x), thickness (y), height (z)
-const PI_MODULE_M = 0.0085;                    // side of the square sensor module
-const PI_MODULE_DEPTH_M = 0.005;
-const PI_LENS_RADIUS_M = 0.003;
-const PI_RIBBON_M = [0.016, 0.0004, 0.022];    // hangs down from the lower edge of the board
-const PI_LED_RADIUS_M = 0.0022;
-const PI_GREEN = 0x1f8a4c, PI_BLACK = 0x1c1c1e, PI_LENS = 0x0c1a26, PI_RIBBON = 0xd9d2c0;
+const PI_BOARD_CORNER_M = 0.003;
+const PI_MODULE_M = 0.009;                     // side of the square sensor module
+const PI_MODULE_DEPTH_M = 0.004;
+const PI_RING_RADIUS_M = 0.0042, PI_RING_DEPTH_M = 0.0012;
+const PI_BARREL_RADIUS_M = 0.0031, PI_BARREL_DEPTH_M = 0.0035;
+const PI_RIBBON_WIDTH_M = 0.016, PI_RIBBON_THICKNESS_M = 0.0004;
+const PI_RIBBON_DROP_M = 0.008;                // straight piece below the board
+const PI_RIBBON_BEND_STEPS = 4, PI_RIBBON_BEND_RADIUS_M = 0.006;
+const PI_RIBBON_TAIL_M = 0.012;                // piece that runs backwards after the bend
+const PI_ARM_LENGTH_M = 0.016, PI_ARM_RADIUS_M = 0.0022;   // bracket arm behind the board
+const PI_FOOT_M = [0.014, 0.003, 0.014];       // bracket foot at the end of the arm
+const PI_LED_RADIUS_M = 0.0016;
+const PI_GREEN = 0x1f8a4c, PI_BLACK = 0x1c1c1e, PI_LENS = 0x0c1a26, PI_RIBBON = 0xe4dccb;
+const PI_METAL = 0xaab1b9, PI_BRACKET = 0x4a515a;
 const LED_RUNNING = 0x22c55e, LED_STOPPED = 0xef4444;
+
+// The board: a rectangle with rounded corners in the x-z plane, extruded along y.
+function buildPiBoard() {
+  const [w, t, h] = PI_BOARD_M, r = PI_BOARD_CORNER_M;
+  const outline = new THREE.Shape();
+  outline.moveTo(-w / 2 + r, -h / 2);
+  outline.lineTo(w / 2 - r, -h / 2).quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+  outline.lineTo(w / 2, h / 2 - r).quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+  outline.lineTo(-w / 2 + r, h / 2).quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+  outline.lineTo(-w / 2, -h / 2 + r).quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+  // The shape lies in x-y and is extruded along z; turning it about x puts the board
+  // upright with its thickness along y.
+  return new THREE.ExtrudeGeometry(outline, { depth: t, bevelEnabled: false, curveSegments: 4 })
+    .translate(0, 0, -t / 2).rotateX(Math.PI / 2);
+}
+
+// The ribbon cable: straight down from the lower edge of the board, a quarter bend, then
+// backwards. Each piece is a flat box; the bend is a few short pieces on an arc.
+function buildPiRibbon() {
+  const pieces = [];
+  const strip = length => new THREE.BoxGeometry(PI_RIBBON_WIDTH_M, PI_RIBBON_THICKNESS_M, length);
+  const bottom = -PI_BOARD_M[2] / 2;
+  pieces.push(strip(PI_RIBBON_DROP_M).translate(0, 0, bottom - PI_RIBBON_DROP_M / 2));
+  const centreY = -PI_RIBBON_BEND_RADIUS_M, centreZ = bottom - PI_RIBBON_DROP_M;
+  const stepRad = Math.PI / 2 / PI_RIBBON_BEND_STEPS;
+  for (let i = 0; i < PI_RIBBON_BEND_STEPS; i++) {
+    const angle = (i + 0.5) * stepRad;          // 0: still going down, 90 degrees: going back
+    // A chord of the arc, turned about x so that it follows the bend.
+    pieces.push(strip(2 * PI_RIBBON_BEND_RADIUS_M * Math.sin(stepRad / 2) * 1.05).rotateX(-angle)
+      .translate(0, centreY + PI_RIBBON_BEND_RADIUS_M * Math.cos(angle),
+                 centreZ - PI_RIBBON_BEND_RADIUS_M * Math.sin(angle)));
+  }
+  pieces.push(new THREE.BoxGeometry(PI_RIBBON_WIDTH_M, PI_RIBBON_TAIL_M, PI_RIBBON_THICKNESS_M)
+    .translate(0, centreY - PI_RIBBON_TAIL_M / 2, centreZ - PI_RIBBON_BEND_RADIUS_M));
+  return pieces.map(piece => solid(piece, PI_RIBBON));
+}
+
+// Everything of a camera except the LED, merged into one geometry with vertex colours.
+function buildPiCamera() {
+  const front = PI_BOARD_M[1] / 2, back = -front;
+  const ringY = front + PI_MODULE_DEPTH_M;
+  return mergeParts([
+    solid(buildPiBoard(), PI_GREEN),
+    solid(rounded(PI_MODULE_M, PI_MODULE_DEPTH_M, PI_MODULE_M, 0.0012)
+      .translate(0, front + PI_MODULE_DEPTH_M / 2, 0), PI_BLACK),
+    solid(cylinderY(PI_RING_RADIUS_M, PI_RING_DEPTH_M, 20)
+      .translate(0, ringY + PI_RING_DEPTH_M / 2, 0), PI_METAL),
+    solid(cylinderY(PI_BARREL_RADIUS_M, PI_BARREL_DEPTH_M, 20)
+      .translate(0, ringY + PI_BARREL_DEPTH_M / 2, 0), PI_BLACK),
+    solid(cylinderY(PI_BARREL_RADIUS_M * 0.7, 0.0004, 16)
+      .translate(0, ringY + PI_BARREL_DEPTH_M + 0.0002, 0), PI_LENS),
+    ...buildPiRibbon(),
+    solid(cylinderY(PI_ARM_RADIUS_M, PI_ARM_LENGTH_M, 10)
+      .translate(0, back - PI_ARM_LENGTH_M / 2, PI_BOARD_M[2] / 4), PI_BRACKET),
+    solid(rounded(...PI_FOOT_M, 0.001)
+      .translate(0, back - PI_ARM_LENGTH_M - PI_FOOT_M[1] / 2, PI_BOARD_M[2] / 4), PI_BRACKET),
+  ]);
+}
 
 let cameraParts = null;   // geometry and materials shared by all tracking cameras
 function sharedCameraParts() {
   if (!cameraParts) {
-    const front = PI_BOARD_M[1] / 2;
-    const body = mergeParts([
-      solid(new THREE.BoxGeometry(...PI_BOARD_M), PI_GREEN),
-      solid(new THREE.BoxGeometry(PI_MODULE_M, PI_MODULE_DEPTH_M, PI_MODULE_M)
-        .translate(0, front + PI_MODULE_DEPTH_M / 2, 0), PI_BLACK),
-      solid(cylinderY(PI_LENS_RADIUS_M, 0.002, 16)
-        .translate(0, front + PI_MODULE_DEPTH_M + 0.001, 0), PI_LENS),
-      solid(new THREE.BoxGeometry(...PI_RIBBON_M)
-        .translate(0, 0, -(PI_BOARD_M[2] + PI_RIBBON_M[2]) / 2), PI_RIBBON),
-    ]);
     cameraParts = {
-      body,
-      led: new THREE.SphereGeometry(PI_LED_RADIUS_M, 10, 8)
-        .translate(PI_BOARD_M[0] / 2 - 0.004, front + PI_LED_RADIUS_M / 2, PI_BOARD_M[2] / 2 - 0.004),
-      bodyMaterial: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }),
+      body: buildPiCamera(),
+      led: new THREE.SphereGeometry(PI_LED_RADIUS_M, 10, 8).translate(
+        PI_BOARD_M[0] / 2 - 0.004, PI_BOARD_M[1] / 2 + PI_LED_RADIUS_M / 2, PI_BOARD_M[2] / 2 - 0.004),
+      bodyMaterial: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1 }),
       ledMaterials: {
         true: new THREE.MeshBasicMaterial({ color: LED_RUNNING }),
         false: new THREE.MeshBasicMaterial({ color: LED_STOPPED }),

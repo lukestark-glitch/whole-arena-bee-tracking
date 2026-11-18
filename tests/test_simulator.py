@@ -2,6 +2,7 @@
 
 import dataclasses
 import math
+import select
 import socket
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from shared.protocol import (
     decode,
     encode_target,
 )
+import simulator.main as main
 from shared.wand import STOP, wand_duration_s, wand_phase
 from simulator.main import (
     Simulation,
@@ -396,3 +398,24 @@ def test_displaced_camera_sees_the_markers_elsewhere() -> None:
         apply_control(after, "camera_displaced", {"camera_id": "cam-99", "angle_rad": 0.02})
     with pytest.raises(ValueError):
         apply_control(after, "camera_displaced", {"camera_id": "cam-06", "angle_rad": 1.0})
+
+
+def test_all_waiting_targets_are_read_and_the_newest_is_kept() -> None:
+    """Several queued target datagrams are read in one go; the robot ends with the newest."""
+    simulation = create_simulation(CONFIG, ROBOT, 1, 1.0)
+    for _ in range(60):
+        step_simulation(simulation)
+    target = Target(
+        0.1, 1, (0.4, 0.1, 0.1), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.3, "flying", 1.0, ()
+    )
+    with (
+        main._target_socket(0) as targets,
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender,
+    ):
+        for t_s in (0.1, 0.3, 0.2):
+            sender.sendto(encode_target(dataclasses.replace(target, t=t_s)), targets.getsockname())
+        # Loopback delivery is immediate; the wait only covers a slow scheduler.
+        select.select([targets], [], [], 2.0)
+        main._drain_targets(simulation, targets)
+        assert simulation.controller.target.t == 0.3
+        main._drain_targets(simulation, targets)
