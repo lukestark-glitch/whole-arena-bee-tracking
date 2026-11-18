@@ -3,6 +3,14 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-18: Plan for flight behaviour models
+
+- `docs/implementation-plan.md`: new optional section "Flight behaviour models" after
+  Stage 7. It plans a second bee motion model (`trips`: light, feeder, entrance, trips along
+  the arena), selected in the config, with the current random model as the default. It also
+  lists the effects on tracking to be measured in Stage 7. New "Open questions" list.
+- Decisions D87 to D89. Planning only, no code changes.
+
 ## 2026-11-14: Stage 5 polish 3
 
 - Fixed: the robot stopped following a selected bee while the simulator window was open on
