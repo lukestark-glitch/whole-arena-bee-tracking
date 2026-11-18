@@ -69,6 +69,10 @@ simulator window on port 8765.
 | `--miscalibrated` | True cameras and robot differ from the config files (`calibration` section) | off |
 | `--wand` | Calibration wand instead of bees; stops after the wand run | off |
 
+Bees fly at random by default. For trips between colony entrance and feeder, drawn by the
+light, choose "Trips to the feeder" in the Flight card of the simulator window, or set
+`bees.flight_model: trips` in the config file.
+
 To see what it sends, start the listener in a second terminal first:
 
 ```bash

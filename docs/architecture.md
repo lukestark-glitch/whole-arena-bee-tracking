@@ -232,7 +232,9 @@ Simulator → page, at most 30 times per second of wall time (also while paused)
  "settings": {"bee_count": 10, "max_speed_m_s": 5.0, "pixel_sigma_px": 0.5,
               "dropout_probability": 0.02, "rail_max_speed_m_s": 2.0,
               "rail_max_acceleration_m_s2": 20.0, "tilt_max_speed_rad_s": 10.0,
-              "tilt_max_acceleration_rad_s2": 200.0},
+              "tilt_max_acceleration_rad_s2": 200.0, "flight_model": "random",
+              "feeder_m": [0.0, 0.15, 0.1], "entrance_m": [0.9, 0.15, 0.1],
+              "light_direction": [-1.0, 0.0, 0.0], "light_strength_m_s2": 0.3},
  "robot": {"rail_m": 0.392, "tilt_rad": 0.11, "focus_m": 0.215, "has_target": true},
  "stopped_nodes": ["node-03"],
  "bees": [{"id": 0, "pos": [0.41, 0.15, 0.17], "vel": [0.8, -0.1, 0.0], "state": "flying"}]}
@@ -248,13 +250,15 @@ Page → simulator, one message per change:
 | --- | --- | --- |
 | `bee_count` | int, 0 to 200 | Bees are added (new ids) or the newest are removed |
 | `max_speed_m_s` | float above 0, at most 20 | Speed limit of all bees |
+| `flight_model` | `"random"` or `"trips"` | Restart at frame 0 with the same seed and the other flight model (D90) |
+| `feeder_m` | `[x, y, z]` on a wall of the arena, metres | Moves the feeder of the trips model; flying bees re-aim at once |
+| `light_strength_m_s2` | float, 0 to 5 | Pull of the trips model towards the light; 0 switches the light off |
 | `pixel_sigma_px` | float, 0 or more | Pixel noise of all cameras |
 | `dropout_probability` | float 0..1 | Chance that a detection is missed |
 | `paused` | bool | Simulation time stops, no UDP messages are sent |
 | `time_scale` | float, 0.01 to 100 | Simulation seconds per second of wall time |
 | `seed` | int | Restart at frame 0 with this seed and the current settings |
 | `node_stopped` | `{"node_id": "node-03", "stopped": true}` | A stopped node sends nothing for both of its cameras; `false` starts it again |
-
 | `camera_displaced` | `{"camera_id": "cam-06", "angle_rad": 0.02}`, angle within 0.2 | The true camera is turned by that angle about its vertical image axis |
 | `rail_max_speed_m_s` | float above 0, at most 20 | Speed limit of the rail |
 | `rail_max_acceleration_m_s2` | float above 0, at most 500 | Acceleration limit of the rail |
