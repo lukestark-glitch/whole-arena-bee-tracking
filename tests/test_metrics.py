@@ -15,6 +15,7 @@ from experiments.metrics import (
     Metrics,
     _collect_truth,
     compute_metrics,
+    compute_prediction_error,
     compute_robot_metrics,
     format_metrics,
     format_robot_metrics,
@@ -90,7 +91,10 @@ def test_ghost_track() -> None:
     """A track far from every bee in all its frames is one ghost."""
     far = (5.0, 5.0, 5.0)
     tracks = {f: {10: BEE_A, 11: BEE_B, 12: far} for f in range(FRAMES)}
-    assert compute_metrics(_truth(), tracks, MATCH_GATE_M).ghost_tracks == 1
+    metrics = compute_metrics(_truth(), tracks, MATCH_GATE_M)
+    assert metrics.ghost_tracks == 1
+    # One of three confirmed tracks matches no bee in any frame.
+    assert math.isclose(metrics.ghost_share, 1 / 3)
 
 
 def test_briefly_far_track_is_no_ghost() -> None:
@@ -150,9 +154,9 @@ def test_read_track_log(tmp_path: Path) -> None:
 
 def test_format_metrics_contains_key_numbers() -> None:
     """The report shows errors in mm, counts and shares in percent."""
-    m = Metrics(10, 0.003, 0.0045, 2, 1, 3, {0: 1.0, 7: 0.5})
+    m = Metrics(10, 0.003, 0.0045, 2, 1, 3, {0: 1.0, 7: 0.5}, 0.25)
     text = format_metrics(m)
-    for expected in ("3.00 mm", "4.50 mm", "2", "75.0 %", "50.0 % (bee 7)"):
+    for expected in ("3.00 mm", "4.50 mm", "2", "75.0 %", "50.0 % (bee 7)", "25.0 % of track"):
         assert expected in text
 
 
@@ -240,3 +244,25 @@ def test_format_robot_metrics() -> None:
         MATCH_GATE_M,
     ))
     assert "frames with target: 1" in text and text.count("100.0 %") == 2
+
+
+def test_robot_follow_errors() -> None:
+    """A bee 5 mm to the side and 1 cm behind the focus plane gives those errors."""
+    bee = (0.455, 0.10, 0.15)
+    axes = RobotAxes(rail_m=0.45, tilt_rad=0.0, focus_m=0.24)
+    m = _robot_metrics(bee, axes, bee)
+    assert math.isclose(m.mean_offset_m, 0.005, abs_tol=1e-9)
+    assert math.isclose(m.mean_focus_error_m, 0.01, abs_tol=1e-9)
+
+
+def test_prediction_error_of_a_moving_bee() -> None:
+    """A track with the bee's true velocity predicts exactly; a wrong velocity misses."""
+    period_s = 0.1
+    truth = {f: {0: (0.1 * f, 0.0, 0.0)} for f in range(6)}
+    tracks = {f: {3: truth[f][0]} for f in range(6)}
+    right = {f: {3: (1.0, 0.0, 0.0)} for f in range(6)}
+    wrong = {f: {3: (0.0, 0.0, 0.0)} for f in range(6)}
+    exact = compute_prediction_error(truth, tracks, right, 2, period_s, MATCH_GATE_M)
+    assert exact.samples == 4 and exact.mean_m < 1e-12 and math.isclose(exact.lead_s, 0.2)
+    missed = compute_prediction_error(truth, tracks, wrong, 2, period_s, MATCH_GATE_M)
+    assert math.isclose(missed.mean_m, 0.2)

@@ -1,0 +1,180 @@
+# Variant of config/default.yaml with 8 cameras on the corners of the box, all aimed at the
+# arena centre (D94). Everything outside the cameras and nodes sections is the same as in
+# config/default.yaml; tests/test_config.py checks that. Select it with --config.
+
+# Default configuration: arena, cameras, nodes, noise and ports.
+# Units: metres, seconds, radians, pixels. Positions are in the arena frame
+# (right-handed, x along the long side, y away from the robot, z up).
+
+# Seed for the single numpy random generator; same seed and config give the same run.
+seed: 1
+
+# Flight arena: a box from the origin to size_m.
+arena:
+  size_m: [0.90, 0.30, 0.30]        # x, y, z
+
+# Camera models; cameras refer to them by id.
+camera_models:
+  pi_gs_imx296:
+    width_px: 1456
+    height_px: 1088
+    fov_horizontal_rad: 1.919862    # 110 degrees
+    rate_hz: 60
+
+# 8 cameras: one on each corner of the box (the corner cameras of config/default.yaml).
+cameras:
+  - id: cam-01
+    model: pi_gs_imx296
+    position_m: [0.00, 0.00, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-04
+    model: pi_gs_imx296
+    position_m: [0.90, 0.00, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-05
+    model: pi_gs_imx296
+    position_m: [0.00, 0.30, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-08
+    model: pi_gs_imx296
+    position_m: [0.90, 0.30, 0.00]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-09
+    model: pi_gs_imx296
+    position_m: [0.00, 0.00, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-12
+    model: pi_gs_imx296
+    position_m: [0.90, 0.00, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-13
+    model: pi_gs_imx296
+    position_m: [0.00, 0.30, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+  - id: cam-16
+    model: pi_gs_imx296
+    position_m: [0.90, 0.30, 0.30]
+    look_at_m: [0.45, 0.15, 0.15]
+
+# 4 camera nodes; each Raspberry Pi holds the two cameras of one vertical edge
+# (0.3 m apart, a short camera cable).
+nodes:
+  - id: node-01
+    cameras: [cam-01, cam-09]
+  - id: node-02
+    cameras: [cam-05, cam-13]
+  - id: node-03
+    cameras: [cam-04, cam-12]
+  - id: node-04
+    cameras: [cam-08, cam-16]
+
+# Detection noise and node latency applied by the simulator. These are the realistic
+# defaults of docs/camera-node.md, not loosened for viewing; not yet measured on hardware.
+noise:
+  pixel_sigma_px: 0.5             # Gaussian image noise per axis
+  dropout_probability: 0.02       # chance a visible bee is missed in a frame
+  node_delay_s: 0.008             # mean camera-node processing delay
+  node_delay_jitter_s: 0.002      # standard deviation of that delay
+
+# Simulated bees. Flight is a random velocity that keeps its direction for about
+# flight_direction_time_s; a bee lands only where it touches a wall.
+bees:
+  count: 10
+  body_length_m: 0.015
+  max_speed_m_s: 5.0
+  flight_speed_m_s: 1.0             # typical (root mean square) speed
+  flight_direction_time_s: 0.5
+  walk_speed_m_s: 0.03
+  walk_turn_rad_per_sqrt_s: 1.0
+  landing_probability: 0.05         # per wall contact
+  takeoff_rate_hz: 0.2
+  sit_to_walk_rate_hz: 0.3
+  walk_to_sit_rate_hz: 0.3
+  flight_model: random              # random or trips (D87)
+  # Trips between colony entrance and feeder, drawn by light along the arena. The layout is
+  # an assumption (Luke) until Jeremy Fielding's footage is measured.
+  trips:
+    light_direction: [-1.0, 0.0, 0.0] # towards the light, here the feeder end at x = 0
+    light_strength_m_s2: 0.3          # 0 switches the light off
+    feeder_m: [0.0, 0.15, 0.10]       # on a wall
+    entrance_m: [0.90, 0.15, 0.10]    # on a wall
+    lateral_spread_m: 0.05
+    vertical_spread_m: 0.04
+    min_cruise_speed_m_s: 0.3
+    max_cruise_speed_m_s: 0.8
+    velocity_jitter_m_s: 0.15
+    feeding_time_s: 4.0               # mean
+    rest_time_s: 6.0                  # mean
+
+# Tracking server. Distances in metres, speeds in m/s.
+tracker:
+  frame_timeout_frames: 2           # process an incomplete frame after this many frame periods
+  claim_gate_m: 0.02                # a track claims a ray this close to its prediction
+  ray_tolerance_m: 0.004            # rays this close to a point support it
+  min_cameras: 3                    # cameras that must agree on a new point
+  min_cameras_tracked: 2            # cameras that must agree on the point of a known track
+  coverage_share: 0.5               # share of the cameras covering a place that must agree
+  arena_margin_m: 0.01              # a new point may lie this far outside the arena
+  assignment_gate_m: 0.1            # largest distance between a prediction and a new point
+  confirm_frames: 5                 # frames in a row before a track gets confirmed
+  max_missed_frames: 15             # frames without support before a track is removed
+  jerk_sigma_m_s3: 1000.0           # filter process noise
+  measurement_sigma_m: 0.002        # noise of a triangulated point per axis
+  initial_speed_sigma_m_s: 2.0      # velocity uncertainty of a new track
+  initial_acceleration_sigma_m_s2: 20.0
+  flying_above_m_s: 0.15            # sitting -> flying above this speed
+  sitting_below_m_s: 0.05           # flying -> sitting below this speed
+  acceleration_smoothing_s: 0.2     # time constant of the acceleration shown for a track
+  prediction_lead_s: 0.1            # how far ahead the shown predicted position lies
+  node_silent_after_s: 0.5          # a node without reports for this long counts as stopped
+  max_backlog_frames: 2             # when more frames than this are waiting, the oldest are skipped
+
+# Calibration: the wand run, the wall markers and the deliberate errors of the simulation.
+calibration:
+  # Simulator option --miscalibrated: every true camera and the true robot are moved away
+  # from the values in the config files by exactly these amounts, in random directions.
+  camera_error_position_m: 0.01     # 1 cm
+  camera_error_angle_rad: 0.034907  # 2 degrees
+  robot_error_m: [0.008, -0.006, 0.005]   # shift of the true rail start
+  # Wand run. The LED first rests on each reference point (they fix scale and frame), then
+  # sweeps the arena, then rests on stop points where the robot is aimed at it.
+  reference_points_m:
+    - [0.10, 0.05, 0.05]
+    - [0.80, 0.05, 0.05]
+    - [0.10, 0.25, 0.25]
+  reference_dwell_s: 1.0            # rest on each reference point
+  sweep_duration_s: 20.0            # moving through the arena
+  sweep_margin_m: 0.03              # the sweep stays this far from the walls
+  sweep_frame_step: 6               # the solver uses every n-th frame of the sweep
+  stop_count: 15                    # wand positions for the robot calibration
+  stop_dwell_s: 1.0                 # rest on each stop point
+  # Wall markers: fixed points with known positions, reported once per marker period.
+  marker_rate_hz: 1.0
+  marker_threshold_px: 3.0          # mean marker error above which a camera counts as displaced
+  min_markers: 4                    # markers a camera must see to be checked and corrected
+  markers:
+    - {id: 1, position_m: [0.225, 0.075, 0.00]}
+    - {id: 2, position_m: [0.675, 0.075, 0.00]}
+    - {id: 3, position_m: [0.225, 0.225, 0.00]}
+    - {id: 4, position_m: [0.675, 0.225, 0.00]}
+    - {id: 5, position_m: [0.45, 0.15, 0.00]}
+    - {id: 6, position_m: [0.225, 0.075, 0.30]}
+    - {id: 7, position_m: [0.675, 0.075, 0.30]}
+    - {id: 8, position_m: [0.225, 0.225, 0.30]}
+    - {id: 9, position_m: [0.675, 0.225, 0.30]}
+    - {id: 10, position_m: [0.45, 0.15, 0.30]}
+    - {id: 11, position_m: [0.30, 0.00, 0.15]}
+    - {id: 12, position_m: [0.60, 0.00, 0.15]}
+    - {id: 13, position_m: [0.30, 0.30, 0.15]}
+    - {id: 14, position_m: [0.60, 0.30, 0.15]}
+    - {id: 15, position_m: [0.00, 0.15, 0.15]}
+    - {id: 16, position_m: [0.90, 0.15, 0.15]}
+
+# Ports: UDP for the messages, TCP for the browser window.
+ports:
+  detections: 5005    # camera nodes to tracker
+  target: 5006        # tracker to robot
+  robot_pose: 5007    # robot to tracker
+  truth: 5008         # simulator to metrics only
+  simulator_window: 8765   # page and WebSocket of the simulator window (TCP)
+  control_window: 8766     # page and WebSocket of the control window (TCP)
