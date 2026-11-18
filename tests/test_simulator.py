@@ -298,6 +298,11 @@ def test_invalid_node_stopped(value: object) -> None:
         ("pixel_sigma_px", True),
         ("bee_count", True),
         ("paused", 1),
+        ("flight_model", "zigzag"),
+        ("feeder_m", [0.45, 0.15, 0.15]),
+        ("feeder_m", [0.0, 0.15]),
+        ("feeder_m", [-0.1, 0.15, 0.1]),
+        ("light_strength_m_s2", -1),
     ],
 )
 def test_invalid_controls(name: str, value: object) -> None:
@@ -419,3 +424,23 @@ def test_all_waiting_targets_are_read_and_the_newest_is_kept() -> None:
         main._drain_targets(simulation, targets)
         assert simulation.controller.target.t == 0.3
         main._drain_targets(simulation, targets)
+
+
+def test_flight_model_control_restarts_with_the_same_seed() -> None:
+    """Switching to trips restarts at frame 0, same seed, with bees resting at the entrance."""
+    simulation = create_simulation(CONFIG, ROBOT, 4, 1.0)
+    for _ in range(30):
+        step_simulation(simulation)
+    apply_control(simulation, "flight_model", "trips")
+    assert simulation.frame == 0 and simulation.seed == 4
+    assert simulation.config.bees.flight_model == "trips"
+    assert all(bee.trip is not None and bee.state == "sitting" for bee in simulation.bees)
+
+
+def test_feeder_and_light_controls_change_the_trip_settings() -> None:
+    """The feeder moves to another wall and the light strength changes."""
+    simulation = create_simulation(CONFIG, ROBOT, 4, 1.0)
+    apply_control(simulation, "feeder_m", [0.45, 0.3, 0.1])
+    apply_control(simulation, "light_strength_m_s2", 0)
+    trips = simulation.config.bees.trips
+    assert trips.feeder_m == (0.45, 0.3, 0.1) and trips.light_strength_m_s2 == 0.0

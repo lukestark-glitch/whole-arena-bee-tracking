@@ -200,3 +200,35 @@ def test_invalid_robot_file_is_refused(tmp_path: Path, change: Callable) -> None
     """A missing key, an empty range, a zero limit or a wrong type gives a ConfigError."""
     with pytest.raises(ConfigError):
         load_robot(_robot_with(tmp_path, change))
+
+
+def test_default_flight_model_is_random() -> None:
+    """The default file keeps random flight and reads the trip block."""
+    bees = load_config(DEFAULT_PATH).bees
+    assert bees.flight_model == "random"
+    assert bees.trips.light_direction == (-1.0, 0.0, 0.0)
+    assert bees.trips.feeder_m == (0.0, 0.15, 0.1)
+
+
+def _trips(raw: dict[str, Any]) -> dict[str, Any]:
+    """Return the trips section of a parsed default file."""
+    return raw["bees"]["trips"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda raw: raw["bees"].update(flight_model="zigzag"),
+        lambda raw: raw["bees"].pop("trips"),
+        lambda raw: _trips(raw).update(feeder_m=[0.45, 0.15, 0.15]),
+        lambda raw: _trips(raw).update(entrance_m=[1.5, 0.15, 0.1]),
+        lambda raw: _trips(raw).update(light_direction=[0.0, 0.0, 0.0]),
+        lambda raw: _trips(raw).update(min_cruise_speed_m_s=1.0),
+        lambda raw: _trips(raw).update(rest_time_s=0.0),
+        lambda raw: _trips(raw).update(lateral_spread_m=-0.1),
+    ],
+)
+def test_invalid_trips_are_refused(tmp_path: Path, change: Callable) -> None:
+    """An unknown flight model or a bad trip block gives a ConfigError."""
+    with pytest.raises(ConfigError):
+        _load_broken(tmp_path, change)

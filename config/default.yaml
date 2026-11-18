@@ -124,6 +124,21 @@ bees:
   takeoff_rate_hz: 0.2
   sit_to_walk_rate_hz: 0.3
   walk_to_sit_rate_hz: 0.3
+  flight_model: random              # random or trips (D87)
+  # Trips between colony entrance and feeder, drawn by light along the arena. The layout is
+  # an assumption (Luke) until Jeremy Fielding's footage is measured.
+  trips:
+    light_direction: [-1.0, 0.0, 0.0] # towards the light, here the feeder end at x = 0
+    light_strength_m_s2: 0.3          # 0 switches the light off
+    feeder_m: [0.0, 0.15, 0.10]       # on a wall
+    entrance_m: [0.90, 0.15, 0.10]    # on a wall
+    lateral_spread_m: 0.05
+    vertical_spread_m: 0.04
+    min_cruise_speed_m_s: 0.3
+    max_cruise_speed_m_s: 0.8
+    velocity_jitter_m_s: 0.15
+    feeding_time_s: 4.0               # mean
+    rest_time_s: 6.0                  # mean
 
 # Tracking server. Distances in metres, speeds in m/s.
 tracker:

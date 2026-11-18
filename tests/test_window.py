@@ -161,6 +161,11 @@ def test_state_message() -> None:
     assert message["settings"] == {
         "bee_count": 10,
         "max_speed_m_s": CONFIG.bees.max_speed_m_s,
+        "flight_model": "random",
+        "feeder_m": list(CONFIG.bees.trips.feeder_m),
+        "entrance_m": list(CONFIG.bees.trips.entrance_m),
+        "light_direction": list(CONFIG.bees.trips.light_direction),
+        "light_strength_m_s2": CONFIG.bees.trips.light_strength_m_s2,
         "pixel_sigma_px": CONFIG.noise.pixel_sigma_px,
         "dropout_probability": CONFIG.noise.dropout_probability,
         "rail_max_speed_m_s": ROBOT.rail.max_speed,
