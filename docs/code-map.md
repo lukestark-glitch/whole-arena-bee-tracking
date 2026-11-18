@@ -33,6 +33,7 @@ Each package gets a section. Each module gets one row.
 | --- | --- |
 | `config/default.yaml` | Arena box, 16 cameras on 8 nodes, camera model `pi_gs_imx296`, noise, bees, tracker settings, calibration (wand run, wall markers, deliberate errors), ports, seed |
 | `config/robot.yaml` | The camera robot: rail, tilt, focus with limits, lens reference point, cinema camera, stereo camera, control settings. Every value with unit and source |
+| `config/cameras-8.yaml`, `config/cameras-10.yaml`, `config/cameras-12.yaml` | Variants of `default.yaml` with 8, 10 and 12 cameras (corners of the box aimed at the centre, plus middle cameras for 10 and 12). Same as the default outside cameras and nodes |
 
 ## `tests/`
 
@@ -60,6 +61,7 @@ Each package gets a section. Each module gets one row.
 | `tests/test_robot_calibration.py` | Rail start, lens offset and focus scale recovered, with and without noise |
 | `tests/test_wand_run.py` | Wand run to calibration in one process; tracking with it within 20 % of the baseline; calibration file; displaced camera found and corrected |
 | `tests/test_control_window.py` | `scene` and `tracks` messages, silent nodes, selection, WebSocket and page end to end |
+| `tests/test_experiments.py` | Coverage of a layout, layout files equal the default outside cameras and nodes, batch runs are deterministic, verdict of the criterion |
 
 ## `simulator/`
 
@@ -98,6 +100,7 @@ Each package gets a section. Each module gets one row.
 | Module | Purpose | Public functions and classes | Used by |
 | --- | --- | --- | --- |
 | `experiments/listen_detections.py` | Listener that prints one summary line of the `detections` per simulation second | `summarise`, `main` | command line |
-| `experiments/metrics.py` | Compare the track log with `truth`: position error, ID swaps, ghost tracks, tracked share; time of the selected bee in the cinema frame and in focus. The only module that reads both | `compute_metrics`, `compute_robot_metrics`, `read_track_log`, `read_selection`, `format_metrics`, `format_robot_metrics`, `Metrics`, `RobotMetrics`, `main` | command line |
-
-Batch runs are not built yet (Stage 7).
+| `experiments/metrics.py` | Compare the track log with `truth`: position error, ID swaps, ghost tracks and ghost share, tracked share, prediction error; time of the selected bee in the cinema frame and in focus, mean offset and focus error. The only module that reads both | `compute_metrics`, `compute_robot_metrics`, `compute_prediction_error`, `read_track_log`, `read_selection`, `format_metrics`, `format_robot_metrics`, `add_truth_datagram`, `Metrics`, `RobotMetrics`, `PredictionError`, `main` | command line |
+| `experiments/batch.py` | Stage 7 batch runner: builds the cases, runs each in its own process with several in parallel, writes `runs.csv`, `summary.csv`, `criterion.csv`, `coverage.json` and plots | `main`, `cases`, `Case`, `case_config`, `run_case`, `wand_calibration`, `summarise`, `criterion`, `estimate_s`, `write_csv` | command line |
+| `experiments/coverage.py` | How many cameras see each point of the arena and the expected triangulation error there | `main`, `coverage_of`, `grid_points`, `visibility`, `expected_errors_m`, `coverage_svg`, `Coverage` | `experiments/batch.py`, command line |
+| `experiments/plots.py` | SVG bar charts in plain Python | `write_plots`, `bar_chart` | `experiments/batch.py` |

@@ -12,7 +12,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 4 | Control window | done |
 | 5 | Robot | done |
 | 6 | Calibration | done |
-| 7 | Experiments and other arena shapes | not started |
+| 7 | Experiments and other arena shapes | in progress |
 | 8 | Optional: rendered camera images and a real detector | not planned yet |
 
 Status values: `not started`, `in progress`, `done`.
@@ -279,18 +279,27 @@ measured against the truth.
 
 **Goal.** Numbers that answer the questions in the concept paper.
 
+**Status.** The experiments are done (`python -m experiments.batch`, results and findings in
+`experiments/REPORT_DATA.md`). Not done: the arena from an STL mesh, which needs the
+`trimesh` dependency (D97, see Open questions).
+
 **Build**
 
 - `experiments/coverage.py`: for a grid of points, the number of cameras that see each
   point and the expected position error. Output as a file and a simple plot page.
 - Batch runner: run a list of configurations without windows and collect the metrics in
   one table (CSV).
-- Experiment configurations: 8, 12 and 16 cameras; 5, 10, 20 and 40 bees; one node failed;
-  node delay of 5, 15 and 30 ms. If the flight behaviour model below exists, the same
-  configurations also with `flight_model: trips`.
+- Experiment configurations (as run, D95): 1, 3, 5, 10 and 20 bees with both flight models;
+  noise and dropout low, nominal and high; 1 and 2 of 8 nodes stopped; 16, 12, 10 and 8
+  cameras at 5 bees with both flight models, and 8 cameras with one of its 4 nodes stopped;
+  node delay of 5, 8, 15 and 30 ms with jitter; calibration (true, none, wall markers, wand);
+  three sets of robot limits. Seeds 1 to 5, 20 s each.
+- An 8-camera layout in the current box (`config/cameras-8.yaml`, D94), judged against a
+  "good enough" criterion written down before the runs (D93); also 10 and 12 cameras.
 - Arena from a triangle mesh (STL file) and an occlusion test (ray against mesh) in the
   visibility check. Needs the `trimesh` dependency: record the decision first.
-- `docs/results.md`: the tables with a short reading of each.
+- `experiments/REPORT_DATA.md`: the tables with a short reading of each (D97).
+- Paper figures of both windows in `docs/paper-figures/`.
 - Follow-ups from the realistic config values (D92): a range of robot limits (the cautious
   values in `config/robot.yaml` up to the earlier, faster ones) to show how much each limit
   costs in time in frame and in focus; the robot numbers run in one process with a fixed
@@ -402,9 +411,15 @@ tuned or replaced.
   used.
 - Robot file: the rail speed of 3 m/s is tagged `stated` (told by Luke), a new source tag
   next to `video`, `assumed` and `measured`.
-- Flight behaviour: the prediction error of the target is not a metric yet. Stage 7 adds it
-  to `experiments/metrics.py` (prediction one frame ahead against the truth) if the
-  comparison needs it.
+- Stage 7: the arena from an STL mesh needs the `trimesh` dependency. Approve it, or keep
+  the box only (D97).
+- Stage 7: an 8-camera arena on 8 nodes of one camera each was costed but not simulated
+  with a stopped node. With 4 nodes one failure takes out a whole vertical edge.
+- Stage 7: 20 s per run and 5 seeds keep the batch under 20 minutes; the robot numbers vary
+  strongly between seeds (see the spread in `summary.csv`). Longer runs would narrow them.
+- Prediction error is now measured with constant velocity from the logged track state
+  (D96), not with the smoothed acceleration the robot uses. Measuring the `target`
+  extrapolation itself would need the smoothed acceleration in the log.
 
 ---
 

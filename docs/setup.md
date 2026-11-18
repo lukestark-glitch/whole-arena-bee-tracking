@@ -157,6 +157,29 @@ Terminal 1 also prints `time in frame` and `time in focus`: the share of the fra
 selected bee in which that bee was inside the cinema picture, and inside it and sharp.
 Do not use `--fast` here: the robot only follows in real time.
 
+## Run the Stage 7 experiments
+
+```bash
+python -m experiments.batch --estimate     # number of runs and estimated time
+python -m experiments.batch                 # every experiment
+```
+
+The batch runs 37 cases with seeds 1 to 5, 20 simulated seconds each, one process per run and
+several processes in parallel. It writes `experiments/results/runs.csv`, `summary.csv`,
+`criterion.csv`, `coverage.json` and SVG plots. It takes about 20 minutes on a laptop with 8
+cores (23 minutes measured on 2026-11-18). `--seeds N` and `--duration S` make it shorter.
+The findings are in `experiments/REPORT_DATA.md`.
+
+Print the coverage of camera layouts:
+
+```bash
+python -m experiments.coverage --configs config/default.yaml config/cameras-8.yaml
+```
+
+The layouts `config/cameras-8.yaml`, `config/cameras-10.yaml` and `config/cameras-12.yaml`
+are selected like the default: pass `--config config/cameras-8.yaml` to the simulator, the
+tracker and the metrics. All three must get the same file.
+
 ## Try another robot
 
 Robot values live in `config/robot.yaml`. Copy the file, change values, and pass the copy
@@ -207,10 +230,6 @@ side by side.
 
 If the simulator is restarted (seed and "Restart"), the tracker notices and starts with
 fresh tracks.
-
-## Run the experiments (after Stage 7)
-
-To be written by Stage 7.
 
 ## Troubleshooting
 
