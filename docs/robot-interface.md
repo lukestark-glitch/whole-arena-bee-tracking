@@ -80,7 +80,7 @@ Known from the videos:
 | Later rail | Commercial linear rail, smaller and lighter |
 | Axes | Rail, tilt, focus motor |
 | Rail speed | 3 m/s (stated by Luke, rated speed of the rail actuator; not from the videos) |
-| Tilt and focus drives | NEMA 23 stepper motors with gearboxes (stated by Luke) |
+| Tilt and focus drives | NEMA 23 stepper motors (stated by Luke); gear ratios unknown |
 | Cinema lens | 180 mm macro at 1.5× magnification |
 | Stereo camera | 2.2 mm lenses, 105° rectified field of view, 50 mm baseline, bee at about 150 mm |
 | Tracking rate | about 32 Hz full image, about 60 Hz in the search window |
@@ -88,15 +88,25 @@ Known from the videos:
 | Dead zone | 2 to 3 mm |
 | Tilt flex | almost 2°, about 7 mm at 200 mm |
 
-Missing and to be asked for:
+Missing and to be asked for. Until then `config/robot.yaml` holds the cautious (slower) end
+of what the drive can do, tagged `assumed` with its derivation (D92):
 
-- Length of travel of the current rail
-- Maximum acceleration of the rail (the speed of 3 m/s is given)
-- Gear ratio, maximum speed and acceleration of the tilt axis, and its range
-- Maximum speed of the focus motor and the focus range
-- Moving mass of the carriage with camera
-- Delay from stereo exposure to motor command
-- Position of the rail and the lens reference point relative to the arena
+| Parameter | Assumed now | Basis |
+| --- | --- | --- |
+| Rail acceleration | 10 m/s² | NEMA 23 class belt drive, about 40 N near 3 m/s, 3 kg moving mass |
+| Rail length of travel | 0.9 m | Arena length; the first rail was about 1.2 m |
+| Tilt gear ratio | 5:1 | Guess |
+| Tilt speed | 8 rad/s | About 400 rpm at the motor through 5:1 |
+| Tilt acceleration | 50 rad/s² | About 1 Nm usable, 5:1, head inertia about 0.03 kg m² |
+| Tilt range | ±0.8 rad | Guess |
+| Focus speed | 0.5 m/s of the focus plane | The 0.1 to 0.6 m range in 1 s |
+| Focus acceleration | 10 m/s² | Full focus speed after 50 ms |
+| Focus range | 0.1 to 0.6 m | Guess |
+| Cinema field of view | 0.096 rad (24 mm wide at 0.25 m) | 36 mm sensor at 1.5× |
+| Cinema depth of field | 2 mm | 1.5× at about f/30 effective; the concept paper's 1 to 2 mm |
+| Moving mass of the carriage with camera | 3 kg | Guess |
+| Delay from stereo exposure to motor command | one frame | Not emulated beyond the frame step (D57) |
+| Position of the rail and the lens reference point | rail 0.15 m in front of the arena, mid-height | Guess |
 
 For scale: a bee reversing from +5 m/s to −5 m/s in 50 ms needs about 200 m/s². The rail
 will not reach that, which is why prediction matters and why the simulation should test a
