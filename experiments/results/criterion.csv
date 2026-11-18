@@ -1,0 +1,9 @@
+cameras,flight_model,seen_by_3_pct,mean_error_le_1mm,p95_error_le_2mm,no_ghost_track,tracked_ge_95pct,id_swaps_le_1_5x,in_frame_within_5,in_focus_within_5,verdict
+16,random,True,True,True,True,True,True,True,True,good enough
+16,trips,True,True,True,True,True,True,True,True,good enough
+12,random,True,True,True,False,True,False,True,True,"not good enough: no_ghost_track, id_swaps_le_1_5x"
+12,trips,True,True,False,True,True,False,True,False,"not good enough: p95_error_le_2mm, id_swaps_le_1_5x, in_focus_within_5"
+10,random,True,True,True,True,True,False,True,True,not good enough: id_swaps_le_1_5x
+10,trips,True,True,True,True,True,True,True,False,not good enough: in_focus_within_5
+8,random,True,True,True,True,True,False,True,True,not good enough: id_swaps_le_1_5x
+8,trips,True,True,False,True,True,True,True,False,"not good enough: p95_error_le_2mm, in_focus_within_5"

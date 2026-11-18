@@ -25,6 +25,7 @@ import itertools
 import json
 import math
 import os
+import statistics
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
@@ -75,9 +76,12 @@ CAMERA_BEES = 5
 NO_MARKER_CHECK_PX = 1e9
 # Slack when comparing send times with frame boundaries, in seconds.
 TIME_EPSILON_S = 1e-9
-# Measured cost of one simulated second of the base case on one core (Apple M-series,
-# 2026-11-18), used only for the printed estimate.
-SECONDS_PER_SIM_SECOND = 1.1
+# Cost of one simulated second of the base case per process, used only for the printed
+# estimate. Measured 2026-11-18 on an 8-core Apple M-series laptop with 7 processes, where
+# the full batch took 17 minutes; one process alone needs about 1.1 s.
+SECONDS_PER_SIM_SECOND = 2.1
+# Metrics whose spread over the seeds the summary also reports (standard deviation).
+SPREAD_METRICS = ("p95_error_mm", "id_swaps", "in_frame_pct", "in_focus_pct")
 # Worker processes: leave one core free for the rest of the computer.
 WORKERS = max(1, (os.cpu_count() or 2) - 1)
 MM_PER_M = 1000.0
@@ -278,7 +282,9 @@ def run_case(case: Case, seed: int, duration_s: float) -> dict[str, Any]:
         next_frame_s = (frame + 1) * period_s
         while queue and queue[0][0] <= next_frame_s + TIME_EPSILON_S:
             deliver(heapq.heappop(queue)[2])
-    return _row(case, seed, duration_s, config, robot, log, period_s,
+    # The robot numbers need the robot as it really is: with --miscalibrated its rail start
+    # differs from the file the tracker was given.
+    return _row(case, seed, duration_s, config, simulation.controller.robot, log, period_s,
                 time.perf_counter() - started_s)
 
 
@@ -300,6 +306,11 @@ def _deliverer(
     ports = config.ports
 
     def deliver(item: Any) -> None:
+        """Hand one datagram to the metrics, the tracker or the robot.
+
+        Args:
+            item: An `Outgoing` datagram of the simulation.
+        """
         if item.port == ports.truth:
             add_truth_datagram(log.truth, log.axes, item.datagram)
             return
@@ -350,7 +361,7 @@ def _row(
         seed: Seed of the run.
         duration_s: Simulated seconds.
         config: Configuration of the run.
-        robot: Robot file values of the run.
+        robot: The true robot of the simulation (geometry and limits).
         log: Collected data.
         period_s: Frame period in seconds.
         wall_s: Wall-clock time the run took, in seconds.
@@ -423,8 +434,9 @@ def summarise(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         rows: One row per run.
 
     Returns:
-        One row per (experiment, label) with the mean of every metric, plus the worst seed
-        for ghost tracks and the number of seeds.
+        One row per (experiment, label) with the mean of every metric, the worst seed for
+        ghost tracks, the standard deviation over the seeds of SPREAD_METRICS and the number
+        of seeds.
     """
     out = []
     # Cases in the order they were run.
@@ -438,6 +450,9 @@ def summarise(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             values = [r[name] for r in group if not _is_nan(r[name])]
             summary[name] = round(sum(values) / len(values), 3) if values else math.nan
         summary["ghost_tracks_max"] = max(r["ghost_tracks"] for r in group)
+        for name in SPREAD_METRICS:
+            values = [r[name] for r in group if not _is_nan(r[name])]
+            summary[f"{name}_sd"] = round(statistics.pstdev(values), 3) if values else math.nan
         out.append(summary)
     return out
 

@@ -35,8 +35,10 @@ SLICE_HEIGHTS = (0.1, 0.5, 0.9)
 SVG_CELL_PX = 6
 # Space between slices and for the labels in the SVG, in SVG pixels.
 SVG_GAP_PX = 30
-# Fill colours for 0, 1, 2, 3 and 4 or more cameras (light to dark).
-COUNT_COLOURS = ("#d7301f", "#fc8d59", "#fdd49e", "#a6d96a", "#1a9641")
+# Fill colours for 0, 1, ... and 8 or more cameras: red below the 3 cameras the ghost-point
+# rule needs, then light to dark green.
+COUNT_COLOURS = ("#d7301f", "#fc8d59", "#fdd49e", "#d9f0a3", "#addd8e", "#78c679", "#41ab5d",
+                 "#238443", "#005a32")
 MM_PER_M = 1000.0
 PERCENT = 100.0
 DEFAULT_OUT = Path("experiments/results")
@@ -190,7 +192,8 @@ def coverage_svg(
     total_px = SVG_GAP_PX + len(SLICE_HEIGHTS) * (height_px + SVG_GAP_PX)
     shares = ", ".join(f"≥{level}: {share * PERCENT:.0f} %"
                        for level, share in summary.share_by_level.items())
-    legend = " ".join(f'<tspan fill="{colour}">■</tspan> {n}{"+" if n == 4 else ""}'
+    last = len(COUNT_COLOURS) - 1
+    legend = " ".join(f'<tspan fill="{colour}">■</tspan> {n}{"+" if n == last else ""}'
                       for n, colour in enumerate(COUNT_COLOURS))
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{max(width_px, 320)}" '
             f'height="{total_px + 20}" font-family="sans-serif">'
