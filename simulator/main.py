@@ -29,6 +29,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+import trimesh
 from websockets.asyncio.server import ServerConnection, broadcast, serve
 from websockets.http11 import Request, Response
 
@@ -64,6 +65,7 @@ from shared.protocol import (
     encode_robot_pose,
     encode_truth,
 )
+from shared.walls import load_walls
 from shared.web import page_response
 from shared.wand import wand_duration_s
 from simulator.bees import FLYING, Bee, create_bee, create_bees, step_bees
@@ -174,6 +176,7 @@ class Simulation:
         exposures: Stereo exposures done since frame 0.
         miscalibrated: True cameras and robot differ from the config files.
         wand: The calibration wand takes the place of the bees.
+        walls: Opaque walls inside the arena from `arena.walls_stl`, or None (D98).
     """
 
     config: Config
@@ -193,6 +196,7 @@ class Simulation:
     miscalibrated: bool = False
     wand: bool = False
     stopped_nodes: frozenset[str] = frozenset()
+    walls: trimesh.Trimesh | None = None
 
 
 def _true_poses(
@@ -274,6 +278,7 @@ def create_simulation(
     return Simulation(
         config, seed, rng, poses, bees, 0, len(bees), False, time_scale,
         controller, robot_rng, marker_rng, miscalibrated=miscalibrated, wand=wand,
+        walls=load_walls(config.arena.walls_stl),
     )
 
 
@@ -413,6 +418,7 @@ def step_simulation(simulation: Simulation) -> list[Outgoing]:
             config.bees.body_length_m,
             config.noise,
             simulation.rng,
+            simulation.walls,
         )
         for c in config.cameras
     }

@@ -6,7 +6,7 @@ stage asks for it.
 ## 2026-11-18: Stage 7 experiments
 
 - `python -m experiments.batch` runs every Stage 7 experiment deterministically in one
-  process per run and writes `experiments/results/` (CSV, JSON, SVG plots). That is 37
+  process per run and writes `experiments/results/` (CSV, JSON, SVG plots). That is 41
   cases with seeds 1 to 5, 20 s each, about 20 minutes (D95).
 - `experiments/coverage.py`: cameras per point and expected error for a layout.
   `experiments/plots.py`: SVG bar charts in plain Python.
@@ -21,7 +21,12 @@ stage asks for it.
   layout that passes. Without calibration the tracker loses every bee. The wall-marker check
   alone brings it back to 0.47 mm mean error.
 - Paper figures of both windows in `docs/paper-figures/`.
-- Not built: the arena from an STL mesh (needs `trimesh`, D97).
+- Arena walls from an STL file (`arena.walls_stl`, new dependency `trimesh`, approved, D98).
+  Example: `config/arena-wall.yaml`, the box with an opaque partition. A bee behind a wall
+  is not detected by the cameras the wall blocks. The tracker leaves those cameras out of
+  its coverage rule (D99). Without that, the divided box gave 74 ID swaps and up to 12
+  ghost tracks. With it, the cost is small with random flight and moderate with trips (p95
+  2.48 mm).
 
 ## 2026-11-18: Realistic values, measured
 

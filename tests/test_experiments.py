@@ -38,6 +38,22 @@ def test_layout_files_differ_from_default_only_in_cameras_and_nodes() -> None:
             assert variant[key] == default[key], (path, key)
 
 
+def test_divided_arena_differs_from_default_only_in_its_walls() -> None:
+    """config/arena-wall.yaml is the default with a walls file."""
+    default = yaml.safe_load((REPO / "config" / "default.yaml").read_text())
+    divided = yaml.safe_load((REPO / "config" / "arena-wall.yaml").read_text())
+    assert divided["arena"]["walls_stl"] == "arenas/divided-box.stl"
+    divided["arena"]["walls_stl"] = None
+    assert divided == default
+
+
+def test_partition_hides_part_of_the_volume() -> None:
+    """The partition leaves points seen by fewer than six cameras, but none by fewer than
+    two."""
+    summary, _, _ = coverage_of(REPO / "config" / "arena-wall.yaml", GRID_SPACING_M)
+    assert summary.share_by_level[2] == 1.0 and summary.share_by_level[6] < 0.9
+
+
 def test_case_labels_are_unique() -> None:
     """Every experiment case has its own label."""
     labels = [(case.experiment, case.label) for case in cases()]

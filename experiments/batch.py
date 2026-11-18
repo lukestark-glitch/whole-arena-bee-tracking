@@ -60,6 +60,8 @@ CAMERA_CONFIGS = {
     10: Path("config/cameras-10.yaml"),
     8: Path("config/cameras-8.yaml"),
 }
+# The 16 cameras of the default with an opaque partition across the box (D98).
+DIVIDED_CONFIG = Path("config/arena-wall.yaml")
 SEEDS = (1, 2, 3, 4, 5)
 # Simulated seconds per run. 20 s hold about 1200 frames and several flights per bee, and
 # keep the whole batch under about 30 minutes on a laptop with 8 cores.
@@ -117,6 +119,7 @@ class Case:
             correction), ``markers`` (miscalibrated, wall-marker correction) or ``wand``
             (miscalibrated, wand calibration and wall-marker correction).
         robot_limits: Key of ROBOT_LIMITS.
+        divided: Use the box with the opaque partition (DIVIDED_CONFIG, 16 cameras).
     """
 
     experiment: str
@@ -131,6 +134,7 @@ class Case:
     stopped_nodes: int = 0
     calibration: str = "true"
     robot_limits: str = "cautious (file)"
+    divided: bool = False
 
 
 def cases() -> list[Case]:
@@ -161,6 +165,9 @@ def cases() -> list[Case]:
     out += [Case("calibration", f"calibration: {mode}", calibration=mode)
             for mode in ("true", "none", "markers", "wand")]
     out += [Case("robot", f"robot limits {name}", robot_limits=name) for name in ROBOT_LIMITS]
+    for model in ("random", "trips"):
+        out += [Case("arena", f"{shape}, {model}", flight_model=model, divided=shape != "box")
+                for shape in ("box", "divided box")]
     return out
 
 
@@ -173,7 +180,7 @@ def case_config(case: Case) -> tuple[Config, Robot]:
     Returns:
         The configuration and the robot description the tracker is given (nominal values).
     """
-    config = load_config(CAMERA_CONFIGS[case.cameras])
+    config = load_config(DIVIDED_CONFIG if case.divided else CAMERA_CONFIGS[case.cameras])
     noise_changes = {name: getattr(case, name) for name in
                      ("pixel_sigma_px", "dropout_probability", "node_delay_s",
                       "node_delay_jitter_s") if getattr(case, name) is not None}
@@ -534,8 +541,11 @@ def main() -> None:
         coverage[cameras] = asdict(summary)
         (args.out / f"coverage-{cameras}.svg").write_text(
             coverage_svg(summary, points_m, counts, GRID_SPACING_M), encoding="utf-8")
+    divided, points_m, counts = coverage_of(DIVIDED_CONFIG, GRID_SPACING_M)
+    (args.out / "coverage-divided.svg").write_text(
+        coverage_svg(divided, points_m, counts, GRID_SPACING_M), encoding="utf-8")
     (args.out / "coverage.json").write_text(
-        json.dumps(list(coverage.values()), indent=1), encoding="utf-8")
+        json.dumps([*coverage.values(), asdict(divided)], indent=1), encoding="utf-8")
     started_s = time.perf_counter()
     with Pool(WORKERS) as pool:
         rows = []
