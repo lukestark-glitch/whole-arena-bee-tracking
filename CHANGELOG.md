@@ -3,6 +3,17 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-18: Flight behaviour models
+
+- New flight model `trips` (`bees.flight_model` in `config/default.yaml`, default stays
+  `random`): bees rest near the colony entrance, fly to the feeder, feed, fly back, drawn by
+  a light along the arena (D87 to D89, D91). With `random` a fixed seed gives exactly the
+  same bees as before (checked over 10 minutes of simulation time).
+- Simulator window: a "Flight" card with the flight model selector, the light strength
+  and the feeder's wall and position. With `trips` the 3D view shows feeder, entrance and
+  light (D90).
+- Fixed a blank line that split the control table in `docs/architecture.md`.
+
 ## 2026-11-18: Plan for flight behaviour models
 
 - `docs/implementation-plan.md`: new optional section "Flight behaviour models" after

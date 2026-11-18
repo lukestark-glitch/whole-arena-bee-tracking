@@ -302,6 +302,8 @@ measured against the truth.
 
 ## Flight behaviour models (optional, not a numbered stage yet)
 
+**Status.** done; the comparison of both models belongs to Stage 7.
+
 **Goal.** A second bee motion model that flies the way bees in Jeremy Fielding's arena
 probably fly. Stage 7 then compares tracking with the current random model on the same
 seed.
