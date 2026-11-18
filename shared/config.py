@@ -71,6 +71,46 @@ class Noise:
     node_delay_jitter_s: float
 
 
+# Bee flight models: today's random flight, and trips between entrance and feeder (D87).
+RANDOM_FLIGHT = "random"
+TRIPS_FLIGHT = "trips"
+FLIGHT_MODELS = (RANDOM_FLIGHT, TRIPS_FLIGHT)
+
+
+@dataclass(frozen=True)
+class Trips:
+    """Parameters of the ``trips`` flight model: bees fly between entrance and feeder.
+
+    Attributes:
+        light_direction: Unit vector towards the light, shape (3,), arena frame.
+        light_strength_m_s2: Constant acceleration of flying bees towards the light, m/s^2.
+        feeder_m: Feeder position on a wall of the box, arena frame, metres.
+        entrance_m: Colony entrance on a wall of the box, arena frame, metres.
+        lateral_spread_m: Standard deviation of the aim point across the lane,
+            horizontal, in metres.
+        vertical_spread_m: Standard deviation of the aim point across the lane, vertical,
+            in metres.
+        min_cruise_speed_m_s: Slowest cruising speed of a trip, in m/s.
+        max_cruise_speed_m_s: Fastest cruising speed of a trip, in m/s.
+        velocity_jitter_m_s: Root mean square deviation of the velocity from the straight
+            line to the aim point, in m/s.
+        feeding_time_s: Mean time a bee stays at the feeder, in s.
+        rest_time_s: Mean time a bee rests near the entrance, in s.
+    """
+
+    light_direction: tuple[float, float, float]
+    light_strength_m_s2: float
+    feeder_m: tuple[float, float, float]
+    entrance_m: tuple[float, float, float]
+    lateral_spread_m: float
+    vertical_spread_m: float
+    min_cruise_speed_m_s: float
+    max_cruise_speed_m_s: float
+    velocity_jitter_m_s: float
+    feeding_time_s: float
+    rest_time_s: float
+
+
 @dataclass(frozen=True)
 class Bees:
     """Number of simulated bees and the parameters of their motion.
@@ -88,6 +128,8 @@ class Bees:
         takeoff_rate_hz: Rate at which a sitting or walking bee takes off, in 1/s.
         sit_to_walk_rate_hz: Rate at which a sitting bee starts to walk, in 1/s.
         walk_to_sit_rate_hz: Rate at which a walking bee stops, in 1/s.
+        flight_model: RANDOM_FLIGHT or TRIPS_FLIGHT.
+        trips: Parameters of the trips model; read with either model.
     """
 
     count: int
@@ -101,6 +143,8 @@ class Bees:
     takeoff_rate_hz: float
     sit_to_walk_rate_hz: float
     walk_to_sit_rate_hz: float
+    flight_model: str
+    trips: Trips
 
 
 @dataclass(frozen=True)
@@ -602,6 +646,49 @@ def _validate(config: Config) -> None:
     _check_frame_rate(config.cameras, config.camera_models)
     _check_node_cameras(config.nodes, config.cameras)
     _check_camera_membership(config.nodes, config.cameras)
+    _check_bees(config.bees, config.arena)
+
+
+def on_wall(position_m: tuple[float, float, float], arena: Arena) -> bool:
+    """Tell whether a point lies on one of the six walls of the arena box.
+
+    Args:
+        position_m: Point, arena frame, metres.
+        arena: Arena box.
+
+    Returns:
+        True if the point is inside the box and on at least one of its walls.
+    """
+    inside = all(0.0 <= x <= size for x, size in zip(position_m, arena.size_m))
+    on_a_wall = any(x in (0.0, size) for x, size in zip(position_m, arena.size_m))
+    return inside and on_a_wall
+
+
+def _check_bees(bees: Bees, arena: Arena) -> None:
+    """Check the flight model and the trip settings.
+
+    Args:
+        bees: Bee settings.
+        arena: Arena box, arena frame, metres.
+
+    Raises:
+        ConfigError: If the flight model is unknown, feeder or entrance is not on a wall,
+            or a trip value is out of range.
+    """
+    trips = bees.trips
+    if bees.flight_model not in FLIGHT_MODELS:
+        raise ConfigError(f"bees flight_model must be one of {FLIGHT_MODELS}")
+    for name in ("feeder_m", "entrance_m"):
+        if not on_wall(getattr(trips, name), arena):
+            raise ConfigError(f"bees.trips {name} must lie on a wall of the arena")
+    if not 0.0 < trips.min_cruise_speed_m_s <= trips.max_cruise_speed_m_s:
+        raise ConfigError("bees.trips needs 0 < min_cruise_speed_m_s <= max_cruise_speed_m_s")
+    if not (trips.feeding_time_s > 0.0 and trips.rest_time_s > 0.0):
+        raise ConfigError("bees.trips feeding_time_s and rest_time_s must be above 0")
+    rest = (trips.light_strength_m_s2, trips.lateral_spread_m, trips.vertical_spread_m,
+            trips.velocity_jitter_m_s)
+    if min(rest) < 0.0:
+        raise ConfigError("bees.trips light strength, spreads and jitter must not be negative")
 
 
 def _parse_noise(raw: Any) -> Noise:
@@ -636,9 +723,40 @@ def _parse_bees(raw: Any) -> Bees:
     Raises:
         ConfigError: If a key is missing.
     """
-    names = [field.name for field in fields(Bees)]
+    names = [field.name for field in fields(Bees) if field.name not in ("flight_model", "trips")]
     values = {name: float(_require(raw, name, "bees")) for name in names}
-    return Bees(**{**values, "count": int(values["count"])})
+    return Bees(
+        **{**values, "count": int(values["count"])},
+        flight_model=str(_require(raw, "flight_model", "bees")),
+        trips=_parse_trips(_require(raw, "trips", "bees")),
+    )
+
+
+def _parse_trips(raw: Any) -> Trips:
+    """Build Trips from the ``bees.trips`` section.
+
+    Args:
+        raw: Parsed YAML mapping.
+
+    Returns:
+        The trip settings (metres, seconds, arena frame); the light direction scaled to
+        unit length.
+
+    Raises:
+        ConfigError: If a key is missing, a vector is malformed or the light direction is
+            zero.
+    """
+    direction = _vec3(_require(raw, "light_direction", "bees.trips"), "light_direction")
+    norm = math.hypot(*direction)
+    if norm == 0.0:
+        raise ConfigError("bees.trips light_direction must not be zero")
+    vectors = ("feeder_m", "entrance_m")
+    numbers = [f.name for f in fields(Trips) if f.name not in ("light_direction", *vectors)]
+    return Trips(
+        light_direction=(direction[0] / norm, direction[1] / norm, direction[2] / norm),
+        **{name: _vec3(_require(raw, name, "bees.trips"), name) for name in vectors},
+        **dict(zip(numbers, _floats(raw, tuple(numbers), "bees.trips"))),
+    )
 
 
 def _parse_tracker(raw: Any) -> TrackerSettings:

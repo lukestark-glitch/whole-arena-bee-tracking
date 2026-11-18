@@ -302,6 +302,8 @@ measured against the truth.
 
 ## Flight behaviour models (optional, not a numbered stage yet)
 
+**Status.** done; the comparison of both models belongs to Stage 7.
+
 **Goal.** A second bee motion model that flies the way bees in Jeremy Fielding's arena
 probably fly. Stage 7 then compares tracking with the current random model on the same
 seed.
@@ -324,12 +326,14 @@ seed.
   stay the same) or `trips`. A `bees.trips` block holds every parameter of the new model:
   light direction (unit vector, arena frame) and strength (an acceleration in m/s² towards
   the light), feeder position, entrance position, lateral and vertical spread of the flight
-  lane (m), speed range of a trip (m/s), mean dwell time at the feeder (s), mean rest time
-  near the entrance (s). Read and checked in `shared/config.py` (`Bees`, its parse
+  lane (m), speed range of a trip (m/s), how far the velocity wanders from the straight
+  line (m/s), mean dwell time at the feeder (s), mean rest time near the entrance (s).
+  Feeder and entrance lie on walls of the box. Read and checked in `shared/config.py` (`Bees`, its parse
   function, `load_config()`) and set in `config/default.yaml` (D87).
 - Trip logic in `simulator/bees.py` as a small state machine per bee (D88): rest near the
   entrance → fly to the feeder → feed (sit or walk on the feeder wall) → fly back along the
-  arena → rest near the entrance → repeat. Arrival means landing on the end wall. Sitting
+  arena → rest near the entrance → repeat. Arrival means touching the wall that holds the
+  goal (feeder or entrance). Sitting
   and walking stay on box walls as today. Functions that change:
   - `Bee`: a trip phase and the time left in it.
   - `create_bee()`, `create_bees()`: with `trips`, bees start resting at the entrance with
@@ -337,8 +341,7 @@ seed.
   - `step_bees()`: picks the step by `flight_model`.
   - `_step_flying()`: the velocity relaxes towards a desired velocity instead of zero (D89),
     plus the light pull. With `random` the desired velocity is zero and the pull is off.
-  - `_handle_walls()`, `_land()`: an end wall in the trip's direction ends the flight; other
-    walls bounce.
+  - `_handle_walls()`, `_land()`: the goal's wall ends the flight; other walls bounce.
   - `_step_sitting()`, `_step_walking()`, `_take_off()`: with `trips`, take-off follows the
     phase timer and the bee heads for the other end.
   - `simulator/main.py`: `create_simulation()`, `step_simulation()` and `_set_bee_count()`
@@ -347,7 +350,11 @@ seed.
   before for a fixed seed; with `trips`, bees reach the feeder and the entrance in turn, fly
   mostly along `x`, stay inside the arena and under the speed limit; a bad `trips` block
   raises `ConfigError`.
-- Later, not part of this section: a flight model selector in the simulator window.
+- Simulator window (D90): a flight model selector (a change restarts with the same seed),
+  the feeder's wall and position, and the strength of the light (0 switches it off). With
+  `trips` the 3D view shows the feeder, the entrance and the light. New controls
+  `flight_model`, `feeder_m` and `light_strength_m_s2`; the `state` message carries the
+  trip settings. Tests in `tests/test_window.py`.
 
 **Effects on tracking, to be measured in Stage 7** (same seed, `random` against `trips`):
 
@@ -365,7 +372,8 @@ seed.
 - With `flight_model: random` every existing test passes unchanged and a fixed seed gives
   the same `truth` as before.
 - With `flight_model: trips` a 60 s run shows bees flying between feeder and entrance, and
-  the Stage 7 batch runner reports the metrics above for both models.
+  the selector, the feeder position and the light strength work in the simulator window.
+- The Stage 7 comparison of both models is part of Stage 7.
 
 Real flight must be measured from Jeremy's footage once it is available; then the model is
 tuned or replaced.

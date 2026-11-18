@@ -1,5 +1,5 @@
-// 3D models shared by the simulator window and the control window: bee, robot, arena and
-// the tracking cameras with their id labels. Display only; sizes are not measured, except where a comment says so.
+// 3D models shared by the simulator window and the control window: bee, robot, arena, the
+// tracking cameras with their id labels, and feeder, entrance and light of the trips model. Display only; sizes are not measured, except where a comment says so.
 // Soft, matte, rounded shapes. Each model is merged into a few meshes per material and its
 // geometry is shared, so a window with dozens of bees still needs only a few draw calls.
 //
@@ -380,6 +380,61 @@ function boxEdges([sx, sy, sz]) {
   for (const [j, k] of [[0, 0], [0, 1], [1, 0], [1, 1]]) edges.push([corner(0, j, k), corner(1, j, k)]);
   for (const [i, k] of [[0, 0], [0, 1], [1, 0], [1, 1]]) edges.push([corner(i, 0, k), corner(i, 1, k)]);
   return edges;
+}
+
+// ---- feeder, entrance and light of the trips flight model ----
+const FEEDER_RADIUS_M = 0.018, FEEDER_THICKNESS_M = 0.004, FEEDER_COLOUR = 0xe8702a;
+const NECTAR_RADIUS_M = 0.007, NECTAR_COLOUR = 0xffd34d;
+const ENTRANCE_RADIUS_M = 0.02, ENTRANCE_TUBE_M = 0.004, ENTRANCE_COLOUR = 0x4a3524;
+const LIGHT_COLOUR = 0xfff3c4, LIGHT_OPACITY = 0.55, LIGHT_ARROW_COLOUR = 0xe0a100;
+const LIGHT_GAP_M = 0.03;          // the lamp panel stands this far outside the glass
+const LIGHT_ARROW_M = 0.15;
+
+// A feeder: an orange dish with a drop of nectar. Built facing +z; the page turns it to
+// face into the arena from its wall.
+export function buildFeeder() {
+  const parts = new PartList();
+  parts.add("dish", new THREE.CylinderGeometry(FEEDER_RADIUS_M, FEEDER_RADIUS_M, FEEDER_THICKNESS_M, 24),
+    [0, 0, FEEDER_THICKNESS_M / 2], [Math.PI / 2, 0, 0]);
+  parts.add("nectar", new THREE.SphereGeometry(NECTAR_RADIUS_M, 16, 8, 0, 2 * Math.PI, 0, Math.PI / 2),
+    [0, 0, FEEDER_THICKNESS_M], [Math.PI / 2, 0, 0]);
+  return parts.toGroup({
+    dish: new THREE.MeshStandardMaterial({ color: FEEDER_COLOUR, roughness: 0.7 }),
+    nectar: new THREE.MeshStandardMaterial({ color: NECTAR_COLOUR, roughness: 0.3 }),
+  });
+}
+
+// The colony entrance: a dark ring with a dark hole. Built facing +z like the feeder.
+export function buildEntrance() {
+  const parts = new PartList();
+  parts.add("ring", new THREE.TorusGeometry(ENTRANCE_RADIUS_M, ENTRANCE_TUBE_M, 8, 24));
+  parts.add("hole", new THREE.CircleGeometry(ENTRANCE_RADIUS_M, 24), [0, 0, 0.001]);
+  return parts.toGroup({
+    ring: new THREE.MeshStandardMaterial({ color: ENTRANCE_COLOUR, roughness: 0.9 }),
+    hole: new THREE.MeshBasicMaterial({ color: 0x1a120c }),
+  });
+}
+
+// The light: a glowing lamp panel outside the wall that faces the light most, and an arrow
+// from the arena centre towards the light. `direction` is a unit vector, arena frame.
+export function buildLight(size, direction) {
+  const group = new THREE.Group();
+  const dir = new THREE.Vector3(...direction);
+  const axis = [0, 1, 2].reduce((best, a) => (Math.abs(direction[a]) > Math.abs(direction[best]) ? a : best), 0);
+  const [u, v] = [0, 1, 2].filter(a => a !== axis);
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(size[u], size[v]),
+    new THREE.MeshBasicMaterial({ color: LIGHT_COLOUR, transparent: true, opacity: LIGHT_OPACITY,
+                                  side: THREE.DoubleSide, depthWrite: false }));
+  const normal = new THREE.Vector3();
+  normal.setComponent(axis, Math.sign(direction[axis]));
+  panel.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+  const centre = new THREE.Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
+  const position = centre.clone();
+  position.setComponent(axis, direction[axis] > 0 ? size[axis] + LIGHT_GAP_M : -LIGHT_GAP_M);
+  panel.position.copy(position);
+  const arrow = new THREE.ArrowHelper(dir, centre, LIGHT_ARROW_M, LIGHT_ARROW_COLOUR, 0.03, 0.02);
+  group.add(panel, arrow);
+  return group;
 }
 
 // ---- tracking camera ----

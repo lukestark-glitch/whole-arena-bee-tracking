@@ -5,11 +5,33 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from shared.config import Arena, Bees
-from simulator.bees import FLYING, SITTING, WALKING, Bee, create_bees, step_bees
+from shared.config import RANDOM_FLIGHT, TRIPS_FLIGHT, Arena, Bees, Trips
+from simulator.bees import (
+    FEEDING,
+    FLYING,
+    RESTING,
+    SITTING,
+    WALKING,
+    Bee,
+    create_bees,
+    step_bees,
+)
 
 DT_S = 1.0 / 60.0
 ARENA = Arena((0.9, 0.3, 0.3))
+TRIPS = Trips(
+    light_direction=(-1.0, 0.0, 0.0),
+    light_strength_m_s2=0.3,
+    feeder_m=(0.0, 0.15, 0.10),
+    entrance_m=(0.9, 0.15, 0.10),
+    lateral_spread_m=0.05,
+    vertical_spread_m=0.04,
+    min_cruise_speed_m_s=0.3,
+    max_cruise_speed_m_s=0.8,
+    velocity_jitter_m_s=0.15,
+    feeding_time_s=4.0,
+    rest_time_s=6.0,
+)
 SETTINGS = Bees(
     count=10,
     body_length_m=0.015,
@@ -22,7 +44,10 @@ SETTINGS = Bees(
     takeoff_rate_hz=0.2,
     sit_to_walk_rate_hz=0.3,
     walk_to_sit_rate_hz=0.3,
+    flight_model=RANDOM_FLIGHT,
+    trips=TRIPS,
 )
+TRIP_SETTINGS = replace(SETTINGS, flight_model=TRIPS_FLIGHT)
 SIZE_M = np.array(ARENA.size_m)
 
 
@@ -117,3 +142,68 @@ def test_walking_bee_velocity_matches_motion() -> None:
                 assert np.linalg.norm(bee.velocity_m_s) == pytest.approx(SETTINGS.walk_speed_m_s)
                 checked += 1
     assert checked > 0
+
+
+def test_random_flight_ignores_the_trip_settings() -> None:
+    """With random flight the trip settings, light included, change nothing."""
+    other = replace(SETTINGS, trips=replace(TRIPS, light_strength_m_s2=5.0, feeder_m=(0.3, 0.0, 0.1)))
+    for first, second in zip(_run(SETTINGS, 4, 600), _run(other, 4, 600)):
+        for a, b in zip(first, second):
+            assert np.array_equal(a.position_m, b.position_m)
+
+
+def _trip_phases(settings: Bees, seed: int, steps: int) -> tuple[list[list[str]], list[Bee]]:
+    """Run the trips model; return each bee's phase sequence and a final snapshot."""
+    rng = np.random.default_rng(seed)
+    bees = create_bees(settings, ARENA, rng)
+    phases: list[list[str]] = [[] for _ in bees]
+    for _ in range(steps):
+        step_bees(bees, settings, ARENA, DT_S, rng)
+        for bee, seen in zip(bees, phases):
+            assert np.all(bee.position_m >= 0.0) and np.all(bee.position_m <= SIZE_M)
+            assert np.linalg.norm(bee.velocity_m_s) <= settings.max_speed_m_s + 1e-12
+            if not seen or seen[-1] != bee.trip.phase:
+                seen.append(bee.trip.phase)
+    return phases, bees
+
+
+def test_trips_start_resting_at_the_entrance() -> None:
+    """Trip bees start sitting on the entrance wall."""
+    bees = create_bees(TRIP_SETTINGS, ARENA, np.random.default_rng(1))
+    assert all(b.state == SITTING and b.trip.phase == RESTING for b in bees)
+    assert all(b.position_m[0] == ARENA.size_m[0] for b in bees)
+
+
+def test_trips_visit_feeder_and_entrance_in_turn() -> None:
+    """Over 120 s bees feed and rest in turn, inside the box and under the speed limit."""
+    phases, _ = _trip_phases(TRIP_SETTINGS, 3, 7200)
+    cycle = ["resting", "to_feeder", "feeding", "to_entrance"]
+    for seen in phases:
+        assert seen.count(FEEDING) >= 2
+        assert all(seen[i + 1] == cycle[(cycle.index(seen[i]) + 1) % 4] for i in range(len(seen) - 1))
+
+
+def test_trips_fly_mostly_along_x() -> None:
+    """Flying trip bees move mainly along the arena's long axis."""
+    rng = np.random.default_rng(5)
+    bees = create_bees(TRIP_SETTINGS, ARENA, rng)
+    along_m, across_m = 0.0, 0.0
+    for _ in range(3600):
+        step_bees(bees, TRIP_SETTINGS, ARENA, DT_S, rng)
+        for bee in bees:
+            if bee.state == FLYING:
+                along_m += abs(bee.velocity_m_s[0])
+                across_m += float(np.linalg.norm(bee.velocity_m_s[1:]))
+    assert along_m > 2.0 * across_m
+
+
+def test_trips_feed_at_a_moved_feeder() -> None:
+    """A feeder on the floor is reached too: feeding bees sit on the floor."""
+    settings = replace(TRIP_SETTINGS, trips=replace(TRIPS, feeder_m=(0.45, 0.15, 0.0)))
+    rng = np.random.default_rng(6)
+    bees = create_bees(settings, ARENA, rng)
+    feeding_heights_m = []
+    for _ in range(3600):
+        step_bees(bees, settings, ARENA, DT_S, rng)
+        feeding_heights_m += [b.position_m[2] for b in bees if b.trip.phase == FEEDING]
+    assert feeding_heights_m and max(feeding_heights_m) == 0.0
