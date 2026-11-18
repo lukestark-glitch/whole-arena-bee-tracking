@@ -1,5 +1,6 @@
 """Closed loop in one process: simulator, tracker and robot emulator talk through messages."""
 
+from dataclasses import replace
 from pathlib import Path
 
 from experiments.metrics import RobotMetrics, compute_robot_metrics
@@ -11,7 +12,18 @@ from tracker.receiver import FrameAssembler
 
 REPO = Path(__file__).parent.parent
 CONFIG = load_config(REPO / "config" / "default.yaml")
-ROBOT = load_robot(REPO / "config" / "robot.yaml")
+# The test checks that the loop follows a bee, not how narrow the lens is: it widens the
+# realistic 24 mm picture and 2 mm depth of field of the robot file to twice their size.
+_FILE_ROBOT = load_robot(REPO / "config" / "robot.yaml")
+VIEW_SCALE = 2.0
+ROBOT = replace(
+    _FILE_ROBOT,
+    cinema=replace(
+        _FILE_ROBOT.cinema,
+        fov_horizontal_rad=_FILE_ROBOT.cinema.fov_horizontal_rad * VIEW_SCALE,
+        depth_of_field_m=_FILE_ROBOT.cinema.depth_of_field_m * VIEW_SCALE,
+    ),
+)
 RUN_FRAMES = 600  # 10 s of simulation time
 MATCH_GATE_M = 0.02
 

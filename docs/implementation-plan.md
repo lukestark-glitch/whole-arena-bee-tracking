@@ -291,6 +291,11 @@ measured against the truth.
 - Arena from a triangle mesh (STL file) and an occlusion test (ray against mesh) in the
   visibility check. Needs the `trimesh` dependency: record the decision first.
 - `docs/results.md`: the tables with a short reading of each.
+- Follow-ups from the realistic config values (D92): a range of robot limits (the cautious
+  values in `config/robot.yaml` up to the earlier, faster ones) to show how much each limit
+  costs in time in frame and in focus; the robot numbers run in one process with a fixed
+  seed, because the three-program runs in real time vary from run to run; and a new run of
+  every robot number once Jeremy gives real limits.
 
 **Done when**
 
@@ -388,6 +393,15 @@ tuned or replaced.
 - Flight behaviour: bees do not leave the arena through the entrance; they rest near it and
   the bee count stays constant (D88). Letting them leave would change the number of bees in
   `truth` during a run.
+- Robot values to ask Jeremy for (D92). Until then `config/robot.yaml` uses the cautious end
+  of a NEMA 23 drive: rail acceleration 10 m/s², tilt 8 rad/s and 50 rad/s² (5:1 gearbox
+  assumed), focus 0.5 m/s and 10 m/s², and the moving mass, ranges and lens position listed
+  in `docs/robot-interface.md`.
+- Cinema camera: 24 mm wide field and 2 mm depth of field are derived from 1.5× on a 36 mm
+  sensor and an assumed f-number near f/30 effective. Ask for the sensor size and aperture
+  used.
+- Robot file: the rail speed of 3 m/s is tagged `stated` (told by Luke), a new source tag
+  next to `video`, `assumed` and `measured`.
 - Flight behaviour: the prediction error of the target is not a metric yet. Stage 7 adds it
   to `experiments/metrics.py` (prediction one frame ahead against the truth) if the
   comparison needs it.

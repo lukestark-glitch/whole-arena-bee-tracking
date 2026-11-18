@@ -68,7 +68,7 @@ def test_edited_robot_yaml_limits_are_respected(tmp_path: Path) -> None:
     """Lower rail limits in robot.yaml directly lower the peak speed and acceleration."""
     text = ROBOT_YAML.read_text()
     edited = text.replace("max_speed_m_s: 3.0", "max_speed_m_s: 0.5", 1)
-    edited = edited.replace("max_acceleration_m_s2: 15.0", "max_acceleration_m_s2: 3.0", 1)
+    edited = edited.replace("max_acceleration_m_s2: 10.0", "max_acceleration_m_s2: 3.0", 1)
     assert edited != text
     assert "max_speed_m_s: 0.5" in edited
     assert "max_acceleration_m_s2: 3.0" in edited
