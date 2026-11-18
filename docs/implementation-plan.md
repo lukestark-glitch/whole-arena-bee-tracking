@@ -12,7 +12,7 @@ Work on one stage at a time and follow `CLAUDE.md`.
 | 4 | Control window | done |
 | 5 | Robot | done |
 | 6 | Calibration | done |
-| 7 | Experiments and other arena shapes | in progress |
+| 7 | Experiments and other arena shapes | done |
 | 8 | Optional: rendered camera images and a real detector | not planned yet |
 
 Status values: `not started`, `in progress`, `done`.
@@ -279,9 +279,9 @@ measured against the truth.
 
 **Goal.** Numbers that answer the questions in the concept paper.
 
-**Status.** The experiments are done (`python -m experiments.batch`, results and findings in
-`experiments/REPORT_DATA.md`). Not done: the arena from an STL mesh, which needs the
-`trimesh` dependency (D97, see Open questions).
+**Status.** done. `python -m experiments.batch` reproduces every table of
+`experiments/REPORT_DATA.md`. The divided box (`config/arena-wall.yaml`) hides bees behind
+its partition from the blocked cameras (D98, `tests/test_walls.py`).
 
 **Build**
 
@@ -297,7 +297,8 @@ measured against the truth.
 - An 8-camera layout in the current box (`config/cameras-8.yaml`, D94), judged against a
   "good enough" criterion written down before the runs (D93); also 10 and 12 cameras.
 - Arena from a triangle mesh (STL file) and an occlusion test (ray against mesh) in the
-  visibility check. Needs the `trimesh` dependency: record the decision first.
+  visibility check. Built as opaque walls inside the glass box, `arena.walls_stl`, with
+  `trimesh` (approved, D98); example `config/arena-wall.yaml`.
 - `experiments/REPORT_DATA.md`: the tables with a short reading of each (D97).
 - Paper figures of both windows in `docs/paper-figures/`.
 - Follow-ups from the realistic config values (D92): a range of robot limits (the cautious
@@ -411,12 +412,9 @@ tuned or replaced.
   used.
 - Robot file: the rail speed of 3 m/s is tagged `stated` (told by Luke), a new source tag
   next to `video`, `assumed` and `measured`.
-- Stage 7: the arena from an STL mesh needs the `trimesh` dependency. Approve it, or keep
-  the box only (D97).
-- Stage 7: an 8-camera arena on 8 nodes of one camera each was costed but not simulated
-  with a stopped node. With 4 nodes one failure takes out a whole vertical edge.
-- Stage 7: 20 s per run and 5 seeds keep the batch under 20 minutes; the robot numbers vary
-  strongly between seeds (see the spread in `summary.csv`). Longer runs would narrow them.
+- Arena walls (D98): bees still move in the whole box and can fly through a wall; walls
+  hide bees from cameras but not the wall markers. Bees that bounce off walls would need
+  the walls in `simulator/bees.py`.
 - Prediction error is now measured with constant velocity from the logged track state
   (D96), not with the smoothed acceleration the robot uses. Measuring the `target`
   extrapolation itself would need the smoothed acceleration in the log.

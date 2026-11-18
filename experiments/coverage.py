@@ -22,6 +22,7 @@ import numpy as np
 
 from shared.config import Config, load_config
 from shared.geometry import camera_pose, focal_length_px, is_visible
+from shared.walls import hidden, load_walls
 
 # Grid spacing of the evaluated points, in metres: 9000 points in the default box, fine
 # enough to see the corners and quick to compute.
@@ -84,19 +85,22 @@ def grid_points(size_m: tuple[float, float, float], spacing_m: float) -> np.ndar
 
 
 def visibility(config: Config, points_m: np.ndarray) -> np.ndarray:
-    """Tell which camera sees which point.
+    """Tell which camera sees which point, walls of the arena included.
 
     Args:
-        config: Configuration with cameras and camera models.
+        config: Configuration with cameras, camera models and arena walls.
         points_m: Shape (N, 3), arena frame, metres.
 
     Returns:
         Shape (C, N) booleans, one row per camera in config order.
     """
-    return np.array([
-        is_visible(camera_pose(c.position_m, c.look_at_m), config.camera_models[c.model], points_m)
-        for c in config.cameras
-    ])
+    walls = load_walls(config.arena.walls_stl)
+    rows = []
+    for camera in config.cameras:
+        pose = camera_pose(camera.position_m, camera.look_at_m)
+        seen = is_visible(pose, config.camera_models[camera.model], points_m)
+        rows.append(seen & ~hidden(walls, pose.position_m, points_m))
+    return np.array(rows)
 
 
 def expected_errors_m(config: Config, points_m: np.ndarray, seen: np.ndarray) -> np.ndarray:

@@ -6,13 +6,13 @@ in `experiments/results/summary.csv` (mean over the seeds) and `runs.csv` (one r
 Screenshots in `docs/paper-figures/` only show the windows; no number here comes from them.
 
 **How the numbers were made.** `python -m experiments.batch` (code of commit c562e5b plus the
-fixes in this pull request), 37 cases, seeds 1 to 5, 20 simulated seconds per run, the first
+fixes in this pull request), 41 cases, seeds 1 to 5, 20 simulated seconds per run, the first
 2 s left out (track start-up), so 18 s are evaluated. Each run puts simulator, tracker and
 robot emulator in one process, so it repeats exactly. Datagrams are delivered in send-time
 order (D95). The tracker selects a bee by itself (`auto_select`: the oldest confirmed track),
 and the robot follows it. Base case unless a table says otherwise: 16 cameras on 8 nodes,
 10 bees, random flight, pixel noise 0.5 px, dropout 2 %, node delay 8 ± 2 ms, true camera
-poses, the cautious robot limits of `config/robot.yaml`. The full batch took 23 minutes on an
+poses, the cautious robot limits of `config/robot.yaml`. The full batch took 22 minutes on an
 8-core laptop.
 
 **Columns.** Mean and p95 error: distance of each matched track from its bee. ID swaps: times
@@ -47,6 +47,7 @@ from 0.5 px noise and the ray geometry):
 | 12 | 6 | 100.0 % | 100.0 % | 100.0 % | 97.1 % | 0.17 | 0.34 |
 | 10 | 5 | 100.0 % | 100.0 % | 100.0 % | 94.9 % | 0.18 | 0.36 |
 | 8 | 4 | 100.0 % | 100.0 % | 100.0 % | 92.4 % | 0.25 | 0.39 |
+| 16, divided box | 8 | 100.0 % | 99.4 % | 97.2 % | 84.5 % | 0.16 | 0.36 |
 
 Every layout sees the whole box with at least 4 cameras, so the ghost-point rule (3 cameras)
 always has a margin. Fewer cameras mainly raise the expected error and shrink the part seen
@@ -300,7 +301,50 @@ the config, and the robot's rail start about 1 cm.
 - Tracking is the same in all three cases, as it should be: the robot does not feed back into
   the tracker.
 
-## 7. What did not work or is weak
+## 7. Arena with an opaque partition
+
+`config/arena-wall.yaml` is the default box with an opaque panel across the middle
+(`config/arenas/divided-box.stl`: 4 mm thick at x = 0.45 m, from the front wall to y = 0.20 m,
+full height; bees pass through the 0.10 m gap at the back). Same 16 cameras. A bee hidden
+from a camera by the panel is not detected by that camera (D98, `tests/test_walls.py`).
+The coverage table in section 1 has a row "16, divided box".
+
+| Case | Mean error (mm) | p95 error (mm) | ID swaps (18 s) | Ghost tracks (worst seed) | Ghost share (%) | Tracked (%) | Lowest bee (%) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| box, random | 0.43 | 1.06 | 5.40 | 0.00 | 0.2 | 99.9 | 99.1 |
+| divided box, random | 0.49 | 1.32 | 6.00 | 0.00 | 0.5 | 99.5 | 97.4 |
+| box, trips | 0.54 | 1.27 | 16.40 | 1.00 | 0.6 | 97.5 | 92.6 |
+| divided box, trips | 0.83 | 2.48 | 17.60 | 1.00 | 0.9 | 96.6 | 88.2 |
+
+| Case | In frame (%) | sd | In focus (%) | sd | Offset from axis (mm) | Focus error (mm) |
+| --- | --- | --- | --- | --- | --- | --- |
+| box, random | 49.7 | 10.0 | 25.1 | 13.9 | 27.67 | 22.87 |
+| divided box, random | 54.5 | 19.4 | 30.8 | 19.3 | 27.50 | 23.04 |
+| box, trips | 97.9 | 2.2 | 81.7 | 4.6 | 1.75 | 1.72 |
+| divided box, trips | 95.8 | 2.1 | 65.9 | 4.8 | 7.97 | 3.00 |
+
+- The panel removes some views (seen by 6 or more cameras: 85 % of the volume instead of
+  100 %), but every point is still seen by at least 2 cameras and 99.4 % by 3 or more.
+- **A wall the tracker does not know about breaks tracking.** In the first run only the
+  simulator knew the panel. The tracker's coverage rule (D33) wants half of the cameras
+  that could see a place. Behind the panel half of them are blocked, so real bees were
+  rejected. The result, from that run (10 bees, seeds 1 to 5, not reproduced by the current
+  command):
+
+  | Case | Mean error (mm) | p95 error (mm) | ID swaps (18 s) | Ghost tracks (worst seed) | Tracked (%) | Lowest bee (%) |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | divided box, random, tracker without walls | 0.87 | 3.31 | 74.4 | 12 | 76.6 | 39.3 |
+  | divided box, trips, tracker without walls | 1.05 | 3.88 | 48.4 | 7 | 83.5 | 58.0 |
+
+  The tracker now reads the walls from the config and leaves blocked cameras out of the
+  rule (D99). The tables above are with that change.
+- With that change the panel costs little with random flight: p95 1.32 mm instead of
+  1.06 mm, 6.0 ID swaps instead of 5.4, worst bee 97 % tracked. It costs more with trips:
+  p95 2.48 mm instead of 1.27 mm, worst bee 88 %, and time in focus 66 % instead of 82 %.
+- Limit: the bees do not know the panel and fly through it. The numbers show the effect of
+  lost views, not of bees crowding at an obstacle.
+
+## 8. What did not work or is weak
 
 - No layout with fewer than 16 cameras passed the criterion.
 - 8 cameras on 4 nodes are fragile: one failed node removes a corner edge and leaves the worst
@@ -313,10 +357,9 @@ the config, and the robot's rail start about 1 cm.
   rank layouts by them.
 - Prediction 100 ms ahead is poor with random flight (33 mm mean). This is a property of the
   random flight model as much as of the tracker.
-- Not run: the arena from an STL mesh with occlusion (needs `trimesh`, not approved, D97),
-  and the 8-camera layout on 8 nodes with a failed node.
+- Not run: the 8-camera layout on 8 nodes with a failed node.
 
-## 8. Assumptions the numbers depend on
+## 9. Assumptions the numbers depend on
 
 - **Robot values are assumed** (`config/robot.yaml`, D92): only the rail speed of 3 m/s is
   stated. Acceleration, tilt and focus limits are the cautious end of a NEMA 23 drive. The
@@ -331,24 +374,26 @@ the config, and the robot's rail start about 1 cm.
   no vibration, no flex and a perfect focus curve (D57).
 - **The selected bee** is always the oldest confirmed track, not a bee a person would pick.
 
-## 9. Limits of the simulation
+## 10. Limits of the simulation
 
 - Virtual cameras deliver points, not images: no reflections, no motion blur, no lighting,
   no background clutter and no blob detector (Stage 8).
 - Bees are points with a size; they do not hide each other, and nothing hides them (no
   occlusion, no robot in the view of a tracking camera).
-- The arena is an empty box; walls are glass that cameras see through.
+- The arena is a glass box. Opaque walls inside it (STL) only hide bees from cameras. Bees
+  fly through them, and they hide no wall markers.
 - The network is ideal apart from the configured delay and jitter: no lost datagrams other
   than dropout, no clock drift, a perfect trigger.
 - Each case was run for 18 evaluated seconds with 5 seeds: enough for tracking numbers, too
   few for robot numbers.
 
-## 10. Files
+## 11. Files
 
 - `experiments/results/runs.csv`, `summary.csv`, `criterion.csv`, `coverage.json`.
 - Plots (SVG, plain Python, no plotting library, D97): `plot-cameras-*.svg`,
   `plot-bees-*.svg`, `plot-coverage.svg`, `plot-noise-*.svg`, `plot-delay-*.svg`,
   `plot-calibration-*.svg`, `plot-robot-*.svg`, `plot-nodes-*.svg`, and coverage maps
-  `coverage-16.svg`, `coverage-12.svg`, `coverage-10.svg`, `coverage-8.svg` (three
+  `coverage-16.svg`, `coverage-12.svg`, `coverage-10.svg`, `coverage-8.svg`,
+  `coverage-divided.svg` (three
   horizontal slices each, colour = number of cameras).
 - Paper figures: `docs/paper-figures/` with its own README.
