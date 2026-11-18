@@ -3,6 +3,11 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-18: Results paper
+
+- `docs/results-paper.pdf` and `docs/results-paper.html`: what was built, how to run it, and
+  all Stage 7 results with screenshots. Numbers come from `experiments/results/`.
+
 ## 2026-11-18: Stage 7 experiments
 
 - `python -m experiments.batch` runs every Stage 7 experiment deterministically in one
