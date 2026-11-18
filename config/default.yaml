@@ -8,6 +8,7 @@ seed: 1
 # Flight arena: a box from the origin to size_m.
 arena:
   size_m: [0.90, 0.30, 0.30]        # x, y, z
+  walls_stl: null                   # STL of opaque walls inside the box, or null (D98)
 
 # Camera models; cameras refer to them by id.
 camera_models:

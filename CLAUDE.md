@@ -49,8 +49,8 @@ If code and one of these files disagree, stop and fix the disagreement first.
 - Prefer plain functions and `@dataclass` types. Add a class only when it holds state.
   No inheritance hierarchies, no plugin systems, no frameworks.
 - One obvious way per task. Do not add a second code path that does the same thing.
-- Allowed runtime dependencies: `numpy`, `scipy`, `pyyaml`, `websockets`. Development:
-  `pytest`, `pdoc`. Browser: `three.js` from a pinned CDN URL, no build step, no npm.
+- Allowed runtime dependencies: `numpy`, `scipy`, `pyyaml`, `websockets`, `trimesh` (D98).
+  Development: `pytest`, `pdoc`. Browser: `three.js` from a pinned CDN URL, no build step, no npm.
   Any other dependency needs an entry in `docs/decisions.md` and the user's approval first.
 - Delete code that is no longer used. Do not comment it out.
 - A new idea from the user goes into the plan or `docs/decisions.md` first, then into code.

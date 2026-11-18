@@ -14,11 +14,13 @@ import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
+import trimesh
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial import cKDTree
 
 from shared.config import Arena, CameraModel, Config, TrackerSettings
 from shared.geometry import CameraPose, camera_pose, is_visible, pixel_to_ray
+from shared.walls import hidden, load_walls
 
 NEW_POINT = -1  # `track_ids` value of a point that was not found for an existing track.
 NO_POINT = -1  # `ray_point` value of a ray that supports no point.
@@ -223,7 +225,8 @@ def triangulate(
     Returns:
         Guided points first (in track order), then new points in acceptance order.
     """
-    guided, used = guided_points(rays, track_ids, predicted_m, cameras, settings)
+    walls = load_walls(arena.walls_stl)
+    guided, used = guided_points(rays, track_ids, predicted_m, cameras, settings, walls)
     new = new_points(rays, used, cameras, arena, settings)
     # New points are numbered after the guided ones; a ray is never in both steps.
     new_rows = np.where(new.ray_point == NO_POINT, NO_POINT, new.ray_point + len(guided.track_ids))
@@ -241,6 +244,7 @@ def guided_points(
     predicted_m: np.ndarray,
     cameras: list[TrackingCamera],
     settings: TrackerSettings,
+    walls: trimesh.Trimesh | None = None,
 ) -> tuple[Points, np.ndarray]:
     """Find a point for each existing track from the rays near its prediction.
 
@@ -256,6 +260,7 @@ def guided_points(
         predicted_m: Predicted track positions, shape (T, 3), metres, arena frame.
         cameras: Camera list that `rays.camera_index` refers to.
         settings: Tracker settings (claim gate, ray tolerance, minimum cameras).
+        walls: Opaque arena walls, or None; cameras behind them do not cover a place.
 
     Returns:
         The guided points (in track order) and a boolean mask of shape (N,) of the rays used.
@@ -279,6 +284,7 @@ def guided_points(
         cameras,
         settings,
         settings.min_cameras_tracked,
+        walls,
     )
     kept = [fit for fit, needed in zip(fits, required) if len(fit[2]) >= needed]
     ray_point = np.full(len(used), NO_POINT, dtype=int)
@@ -334,7 +340,8 @@ def new_points(
         settings.ray_tolerance_m,
         max(settings.min_cameras, _MIN_RAYS_FOR_POINT),
     )
-    ordered = _order_candidates(*candidates, origins, directions, cameras, settings)
+    walls = load_walls(arena.walls_stl)
+    ordered = _order_candidates(*candidates, origins, directions, cameras, settings, walls)
     accepted = _accept_greedily(ordered, origins, directions, box, settings)
     ray_point = np.full(len(used), NO_POINT, dtype=int)
     ray_point[free] = accepted.ray_point
@@ -696,6 +703,7 @@ def _order_candidates(
     directions: np.ndarray,
     cameras: list[TrackingCamera],
     settings: TrackerSettings,
+    walls: trimesh.Trimesh | None,
 ) -> list[tuple[np.ndarray, np.ndarray, int]]:
     """Sort candidates: most cameras first, ties by smallest mean ray distance.
 
@@ -709,6 +717,7 @@ def _order_candidates(
         directions: Unit directions, shape (N, 3).
         cameras: Camera list.
         settings: Tracker settings.
+        walls: Opaque arena walls, or None.
 
     Returns:
         List of (point, support row, required camera count) in the order they are tried.
@@ -719,7 +728,7 @@ def _order_candidates(
     along = np.einsum("kci,kci->kc", offset, directions[safe])
     perpendicular = np.linalg.norm(offset - along[..., None] * directions[safe], axis=2)
     mean_distance_m = np.where(support >= 0, perpendicular, 0.0).sum(axis=1) / counts
-    required = _required_cameras(points_m, cameras, settings, settings.min_cameras)
+    required = _required_cameras(points_m, cameras, settings, settings.min_cameras, walls)
     keep = np.flatnonzero(counts >= required)
     order = keep[np.lexsort((mean_distance_m[keep], -counts[keep]))]
     return [(points_m[k], support[k], int(required[k])) for k in order]
@@ -730,6 +739,7 @@ def _required_cameras(
     cameras: list[TrackingCamera],
     settings: TrackerSettings,
     min_cameras: int,
+    walls: trimesh.Trimesh | None,
 ) -> np.ndarray:
     """Number of cameras that must agree on each point: more where more cameras cover it.
 
@@ -741,11 +751,17 @@ def _required_cameras(
         cameras: Camera list.
         settings: Tracker settings.
         min_cameras: Smallest number allowed, whatever the coverage.
+        walls: Opaque arena walls, or None. A camera whose view of the point a wall blocks
+            does not cover it (D98).
 
     Returns:
         max(min_cameras, ceil(coverage_share * cameras that can see the point)), shape (K,).
     """
-    visible = sum(is_visible(c.pose, c.model, points_m).astype(int) for c in cameras)
+    visible = sum(
+        (is_visible(c.pose, c.model, points_m) & ~hidden(walls, c.pose.position_m, points_m))
+        .astype(int)
+        for c in cameras
+    )
     shared = np.ceil(settings.coverage_share * visible).astype(int)
     return np.maximum(min_cameras, shared)
 

@@ -8,7 +8,7 @@ version = "0.0.0"
 description = "Proof of concept for whole-arena 3D tracking of bumblebees"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-dependencies = ["numpy", "scipy", "pyyaml", "websockets"]
+dependencies = ["numpy", "scipy", "pyyaml", "websockets", "trimesh"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pdoc"]

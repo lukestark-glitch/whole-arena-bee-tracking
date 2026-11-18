@@ -7,8 +7,10 @@ ground truth (the ``truth`` UDP messages). It imports nothing from ``tracker`` o
     python -m experiments.metrics --tracks runs/tracks.jsonl --duration 60
 
 Besides the tracking quality it reports, when a bee was selected in the tracker, how long the
-selected bee was inside the cinema camera's frame and inside its depth of field. For that it
-uses the robot axes that come with the ``truth`` messages and the robot file (``--robot``).
+selected bee was inside the cinema camera's frame and inside its depth of field, and how far
+it was from the optical axis and the focus plane. For that it uses the robot axes that come
+with the ``truth`` messages and the robot file (``--robot``). `compute_prediction_error`
+measures how well a track's state predicts where its bee will be a little later.
 """
 
 from __future__ import annotations
@@ -60,6 +62,8 @@ class Metrics:
         ghost_tracks: Confirmed track ids that matched no bee in over half of their frames.
         track_count: Distinct confirmed track ids seen.
         tracked_share: Bee id -> share of its frames in which it was matched (0..1).
+        ghost_share: Share of confirmed track-frames that matched no bee: the ghost points
+            that became tracks (0..1, nan if there were no tracks).
     """
 
     frames: int
@@ -69,6 +73,7 @@ class Metrics:
     ghost_tracks: int
     track_count: int
     tracked_share: dict[int, float]
+    ghost_share: float
 
 
 @dataclass(frozen=True)
@@ -81,11 +86,35 @@ class RobotMetrics:
             no frames).
         in_focus_share: Share of those frames with the bee inside the image and within the
             depth of field (0..1, nan if no frames).
+        mean_offset_m: Mean distance of the followed bee from the cinema camera's optical
+            axis, in metres at the bee, over the frames in which the bee was identified
+            (nan if none).
+        mean_focus_error_m: Mean distance of the followed bee from the focus plane along the
+            optical axis, in metres, over the same frames (nan if none).
     """
 
     frames: int
     in_frame_share: float
     in_focus_share: float
+    mean_offset_m: float
+    mean_focus_error_m: float
+
+
+@dataclass(frozen=True)
+class PredictionError:
+    """How far a track's constant-velocity prediction lands from its bee.
+
+    Attributes:
+        lead_s: How far ahead the prediction looks, in seconds.
+        samples: Number of predictions compared.
+        mean_m: Mean distance from the bee's true position, in metres (nan if none).
+        p95_m: 95th percentile of that distance, in metres (nan if none).
+    """
+
+    lead_s: float
+    samples: int
+    mean_m: float
+    p95_m: float
 
 
 @dataclass
@@ -285,6 +314,8 @@ def compute_metrics(
         bee_id: tally.bee_matched.get(bee_id, 0) / seen
         for bee_id, seen in sorted(tally.bee_frames.items())
     }
+    track_frames = sum(tally.track_frames.values())
+    ghost_share = sum(tally.track_unmatched.values()) / track_frames if track_frames else math.nan
     return Metrics(
         frames=len(frames),
         mean_error_m=mean_m,
@@ -293,7 +324,45 @@ def compute_metrics(
         ghost_tracks=_count_ghosts(tally),
         track_count=len(tally.track_frames),
         tracked_share=share,
+        ghost_share=ghost_share,
     )
+
+
+def compute_prediction_error(
+    truth: FramePositions,
+    tracks: FramePositions,
+    velocities: FramePositions,
+    lead_frames: int,
+    frame_period_s: float,
+    match_gate_m: float,
+) -> PredictionError:
+    """Compare each matched track's prediction with where its bee really is later.
+
+    The prediction is position plus velocity times the lead time. Constant velocity is used
+    because the raw filter acceleration in the log is too noisy to extrapolate with (D43).
+
+    Args:
+        truth: Frame number -> {bee id -> true position in metres, arena frame}.
+        tracks: Frame number -> {track id -> position in metres}, confirmed tracks only.
+        velocities: Frame number -> {track id -> velocity in m/s}, same tracks.
+        lead_frames: How many frames ahead to predict.
+        frame_period_s: Time between frames, in seconds.
+        match_gate_m: Largest bee-track distance that still counts as a match, in metres.
+
+    Returns:
+        The error statistics over every matched track whose bee exists ``lead_frames`` later.
+    """
+    lead_s = lead_frames * frame_period_s
+    errors_m = []
+    for frame in sorted(f for f in truth if f in tracks and f + lead_frames in truth):
+        later = truth[frame + lead_frames]
+        for bee_id, track_id, _ in _match_frame(truth[frame], tracks[frame], match_gate_m):
+            if bee_id in later:
+                predicted = np.add(tracks[frame][track_id],
+                                   np.multiply(velocities[frame][track_id], lead_s))
+                errors_m.append(math.dist(predicted, later[bee_id]))
+    mean_m, p95_m = _error_statistics(errors_m)
+    return PredictionError(lead_s, len(errors_m), mean_m, p95_m)
 
 
 def format_metrics(metrics: Metrics) -> str:
@@ -312,6 +381,7 @@ def format_metrics(metrics: Metrics) -> str:
         f"id swaps:           {metrics.id_swaps}",
         f"ghost tracks:       {metrics.ghost_tracks}",
         f"confirmed tracks:   {metrics.track_count}",
+        f"ghost share:        {metrics.ghost_share * PERCENT:.1f} % of track frames",
     ]
     if metrics.tracked_share:
         shares = metrics.tracked_share
@@ -331,7 +401,7 @@ def _followed_bee_in_view(
     bees: dict[int, Position],
     track_pos: Position | None,
     match_gate_m: float,
-) -> tuple[bool, bool]:
+) -> tuple[bool, bool, tuple[float, float] | None]:
     """Tell whether the bee behind the selected track is in frame and in focus.
 
     Args:
@@ -343,20 +413,26 @@ def _followed_bee_in_view(
         match_gate_m: Largest track-bee distance that still identifies the bee, in metres.
 
     Returns:
-        (in frame, in focus). Both are False when the bee cannot be identified.
+        (in frame, in focus, errors). Errors are the distance of the bee from the optical
+        axis and from the focus plane, in metres, or None when the bee cannot be identified;
+        then both flags are False too.
     """
     if track_pos is None or not bees:
-        return False, False
+        return False, False, None
     distance_m = {i: math.dist(pos, track_pos) for i, pos in bees.items()}
     bee_id = min(distance_m, key=lambda i: distance_m[i])
     if distance_m[bee_id] > match_gate_m:
-        return False, False
+        return False, False, None
     pose = robot_camera_pose(robot, axes.rail_m, axes.tilt_rad)
-    in_frame, depth_m = cinema_view(pose, robot.cinema, np.array([bees[bee_id]]))
+    bee_m = np.array([bees[bee_id]])
+    in_frame, depth_m = cinema_view(pose, robot.cinema, bee_m)
+    # The bee in the camera frame: its x and y are the offset from the optical axis.
+    camera_xyz_m = pose.rotation @ (bee_m[0] - pose.position_m)
+    focus_error_m = abs(float(depth_m[0]) - axes.focus_m)
     # The depth of field is centred on the focus plane, so half of it lies on each side.
     half_depth_m = robot.cinema.depth_of_field_m / 2
-    in_focus = bool(in_frame[0]) and abs(float(depth_m[0]) - axes.focus_m) <= half_depth_m
-    return bool(in_frame[0]), in_focus
+    in_focus = bool(in_frame[0]) and focus_error_m <= half_depth_m
+    return bool(in_frame[0]), in_focus, (float(np.hypot(*camera_xyz_m[:2])), focus_error_m)
 
 
 def compute_robot_metrics(
@@ -383,16 +459,26 @@ def compute_robot_metrics(
     frames = sorted(f for f in selection if f in truth and f in axes)
     in_frame_count = 0
     in_focus_count = 0
+    errors_m = []
     for frame in frames:
         track_pos = tracks.get(frame, {}).get(selection[frame])
-        in_frame, in_focus = _followed_bee_in_view(
+        in_frame, in_focus, errors = _followed_bee_in_view(
             robot, axes[frame], truth[frame], track_pos, match_gate_m
         )
         in_frame_count += in_frame
         in_focus_count += in_focus
+        if errors is not None:
+            errors_m.append(errors)
     if not frames:
-        return RobotMetrics(0, math.nan, math.nan)
-    return RobotMetrics(len(frames), in_frame_count / len(frames), in_focus_count / len(frames))
+        return RobotMetrics(0, math.nan, math.nan, math.nan, math.nan)
+    offset_m, focus_m = np.mean(errors_m, axis=0) if errors_m else (math.nan, math.nan)
+    return RobotMetrics(
+        len(frames),
+        in_frame_count / len(frames),
+        in_focus_count / len(frames),
+        float(offset_m),
+        float(focus_m),
+    )
 
 
 def format_robot_metrics(metrics: RobotMetrics) -> str:
@@ -402,13 +488,15 @@ def format_robot_metrics(metrics: RobotMetrics) -> str:
         metrics: Result of `compute_robot_metrics`.
 
     Returns:
-        Three lines of text; shares in percent.
+        Five lines of text; shares in percent, errors in millimetres.
     """
     return "\n".join(
         [
             f"frames with target: {metrics.frames}",
             f"time in frame:      {metrics.in_frame_share * PERCENT:.1f} %",
             f"time in focus:      {metrics.in_focus_share * PERCENT:.1f} %",
+            f"offset from axis:   {metrics.mean_offset_m * MM_PER_M:.1f} mm",
+            f"focus error:        {metrics.mean_focus_error_m * MM_PER_M:.1f} mm",
         ]
     )
 
@@ -463,10 +551,43 @@ def _receive_into(
     if message is None:
         return last_frame is not None and last_frame in frames
     if last_frame is None or message.frame <= last_frame:
-        frames.setdefault(message.frame, {}).update({bee.id: bee.pos for bee in message.bees})
-        if message.robot is not None:
-            axes[message.frame] = message.robot
+        _store_truth(frames, axes, message)
     return last_frame is not None and message.frame >= last_frame
+
+
+def _store_truth(frames: FramePositions, axes: dict[int, RobotAxes], message: Truth) -> None:
+    """Keep the bee positions and robot axes of one truth message.
+
+    Args:
+        frames: Collected positions, extended in place.
+        axes: Collected robot axes per frame, extended in place.
+        message: One truth message (a frame may come in several parts).
+    """
+    frames.setdefault(message.frame, {}).update({bee.id: bee.pos for bee in message.bees})
+    if message.robot is not None:
+        axes[message.frame] = message.robot
+
+
+def add_truth_datagram(
+    frames: FramePositions, axes: dict[int, RobotAxes], datagram: bytes
+) -> None:
+    """Keep the truth of one datagram, for runs that hand the datagrams over in one process.
+
+    The batch runner passes truth datagrams here unread, so this module stays the only one
+    that reads the truth.
+
+    Args:
+        frames: Collected positions, extended in place.
+        axes: Collected robot axes per frame, extended in place.
+        datagram: An encoded `truth` message.
+
+    Raises:
+        ProtocolError: If the datagram is not a valid truth message.
+    """
+    message = decode(datagram)
+    if not isinstance(message, Truth):
+        raise ProtocolError("not a truth message")
+    _store_truth(frames, axes, message)
 
 
 def _is_silent(sock: socket.socket) -> bool:

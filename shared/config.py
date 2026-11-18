@@ -9,7 +9,7 @@ robot, z up, in metres.
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -27,9 +27,16 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Arena:
-    """Flight arena box from the origin to ``size_m`` (arena frame, metres)."""
+    """Flight arena box from the origin to ``size_m`` (arena frame, metres).
+
+    Attributes:
+        size_m: Box size along x, y and z, metres. The box walls are glass.
+        walls_stl: STL file of opaque walls inside the box (metres, arena frame), or None
+            for the empty box (D98).
+    """
 
     size_m: tuple[float, float, float]
+    walls_stl: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -865,7 +872,10 @@ def _parse(raw: Any) -> Config:
     models_raw = _require(raw, "camera_models", "top level")
     return Config(
         seed=int(_require(raw, "seed", "top level")),
-        arena=Arena(size_m=_vec3(_require(arena_raw, "size_m", "arena"), "arena size_m")),
+        arena=Arena(
+            size_m=_vec3(_require(arena_raw, "size_m", "arena"), "arena size_m"),
+            walls_stl=_optional_path(_require(arena_raw, "walls_stl", "arena")),
+        ),
         camera_models={k: _parse_camera_model(k, v) for k, v in models_raw.items()},
         cameras=tuple(_parse_camera(c) for c in _require(raw, "cameras", "top level")),
         nodes=tuple(_parse_node(n) for n in _require(raw, "nodes", "top level")),
@@ -875,6 +885,25 @@ def _parse(raw: Any) -> Config:
         calibration=_parse_calibration(_require(raw, "calibration", "top level")),
         ports=_parse_ports(_require(raw, "ports", "top level")),
     )
+
+
+def _optional_path(raw: Any) -> Path | None:
+    """Read a file path that may be null.
+
+    Args:
+        raw: Parsed YAML value: a string or None.
+
+    Returns:
+        The path as written in the file, or None.
+
+    Raises:
+        ConfigError: If the value is neither a string nor null.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ConfigError("a file path must be text or null")
+    return Path(raw)
 
 
 def _floats(raw: Any, names: tuple[str, ...], section: str) -> list[float]:
@@ -1030,5 +1059,13 @@ def load_config(path: Path) -> Config:
             is inconsistent.
     """
     config = _load(path, _parse)
+    walls_stl = config.arena.walls_stl
+    if walls_stl is not None:
+        # Relative paths are relative to the config file, so the file can be loaded from
+        # any working directory.
+        walls_stl = path.parent / walls_stl
+        if not walls_stl.is_file():
+            raise ConfigError(f"arena walls_stl file not found: {walls_stl}")
+        config = replace(config, arena=replace(config.arena, walls_stl=walls_stl))
     _validate(config)
     return config

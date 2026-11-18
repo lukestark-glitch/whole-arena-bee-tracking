@@ -3,6 +3,31 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-18: Stage 7 experiments
+
+- `python -m experiments.batch` runs every Stage 7 experiment deterministically in one
+  process per run and writes `experiments/results/` (CSV, JSON, SVG plots). That is 41
+  cases with seeds 1 to 5, 20 s each, about 20 minutes (D95).
+- `experiments/coverage.py`: cameras per point and expected error for a layout.
+  `experiments/plots.py`: SVG bar charts in plain Python.
+- `experiments/metrics.py`: ghost share, prediction error (17 ms and 100 ms) and the robot's
+  follow error (offset from the optical axis and focus error) (D96).
+- New layouts `config/cameras-8.yaml`, `cameras-10.yaml` and `cameras-12.yaml` in the
+  current box (D94). The "good enough" criterion was committed before the runs (D93).
+- Findings in `experiments/REPORT_DATA.md`. 8 cameras see the whole box with at least 4
+  cameras and keep the mean error at 0.52 mm (random) and 0.79 mm (trips), but they fail the
+  criterion: more ID swaps, a p95 of 2.33 mm with trips, less time in focus, and fragile
+  when one of the 4 nodes fails. 10 and 12 cameras fail it too, so 16 stays the smallest
+  layout that passes. Without calibration the tracker loses every bee. The wall-marker check
+  alone brings it back to 0.47 mm mean error.
+- Paper figures of both windows in `docs/paper-figures/`.
+- Arena walls from an STL file (`arena.walls_stl`, new dependency `trimesh`, approved, D98).
+  Example: `config/arena-wall.yaml`, the box with an opaque partition. A bee behind a wall
+  is not detected by the cameras the wall blocks. The tracker leaves those cameras out of
+  its coverage rule (D99). Without that, the divided box gave 74 ID swaps and up to 12
+  ghost tracks. With it, the cost is small with random flight and moderate with trips (p95
+  2.48 mm).
+
 ## 2026-11-18: Realistic values, measured
 
 - `config/robot.yaml`: the cinema field of view (0.096 rad, 24 mm wide at 0.25 m) and depth

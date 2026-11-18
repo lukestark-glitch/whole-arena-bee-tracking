@@ -54,8 +54,8 @@ Owns simulation time and the ground truth.
 - Bee model: each bee is sitting, walking or flying. Positions advance once per frame.
   A flying bee lands only where it touches a wall, so it never jumps.
 - Virtual cameras: project every visible bee into every camera, merge blobs that overlap
-  in the image, add pixel noise and drop detections at random. Wall markers follow in
-  Stage 6.
+  in the image, add pixel noise and drop detections at random. A bee behind an opaque wall
+  of the arena (`arena.walls_stl`, D98) is not visible; the box itself is glass.
 - Camera nodes: group two cameras per node, add the node's processing delay (one random
   delay per node and frame, shared by both cameras), and send one `detections` message per
   camera and frame. A node stopped from the simulator window sends nothing for both cameras.
@@ -120,7 +120,9 @@ The software under test. Knows nothing about the simulator.
 
 - Receiver: collects `detections` and groups them by `frame`. Processes a frame when all
   expected cameras have reported or a timeout has passed.
-- Triangulation: pixels to rays, rays to candidate 3D points, ghost rejection.
+- Triangulation: pixels to rays, rays to candidate 3D points, ghost rejection. The tracker
+  reads the arena walls from the config, so a camera a wall blocks does not count as covering
+  a place (D99).
 - Tracks: one Kalman filter per bee, assignment of points to tracks, track creation after a
   probation time, track removal after a time without support.
 - Input: both UDP sockets are read empty whenever they become readable. If the tracker has

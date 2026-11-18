@@ -1,0 +1,72 @@
+[
+ {
+  "config": "config/default.yaml",
+  "cameras": 16,
+  "nodes": 8,
+  "points": 24000,
+  "share_by_level": {
+   "2": 1.0,
+   "3": 1.0,
+   "4": 1.0,
+   "6": 1.0
+  },
+  "median_error_m": 0.0001507137183252444,
+  "p95_error_m": 0.0002488490385700266
+ },
+ {
+  "config": "config/cameras-12.yaml",
+  "cameras": 12,
+  "nodes": 6,
+  "points": 24000,
+  "share_by_level": {
+   "2": 1.0,
+   "3": 1.0,
+   "4": 1.0,
+   "6": 0.971
+  },
+  "median_error_m": 0.00016515094705404513,
+  "p95_error_m": 0.0003386908833215339
+ },
+ {
+  "config": "config/cameras-10.yaml",
+  "cameras": 10,
+  "nodes": 5,
+  "points": 24000,
+  "share_by_level": {
+   "2": 1.0,
+   "3": 1.0,
+   "4": 1.0,
+   "6": 0.9488333333333333
+  },
+  "median_error_m": 0.000182473073394431,
+  "p95_error_m": 0.0003580311439452331
+ },
+ {
+  "config": "config/cameras-8.yaml",
+  "cameras": 8,
+  "nodes": 4,
+  "points": 24000,
+  "share_by_level": {
+   "2": 1.0,
+   "3": 1.0,
+   "4": 1.0,
+   "6": 0.9243333333333333
+  },
+  "median_error_m": 0.00024891729517142645,
+  "p95_error_m": 0.00038799260940019766
+ },
+ {
+  "config": "config/arena-wall.yaml",
+  "cameras": 16,
+  "nodes": 8,
+  "points": 24000,
+  "share_by_level": {
+   "2": 1.0,
+   "3": 0.9943333333333333,
+   "4": 0.9715,
+   "6": 0.8455
+  },
+  "median_error_m": 0.00016221651519381357,
+  "p95_error_m": 0.0003567975546934598
+ }
+]

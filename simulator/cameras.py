@@ -5,10 +5,12 @@ camera node code in `simulator/nodes.py` packs the result into `detections` mess
 """
 
 import numpy as np
+import trimesh
 from scipy.sparse.csgraph import connected_components
 
 from shared.config import CameraModel, Noise
 from shared.geometry import CameraPose, focal_length_px, is_visible, project
+from shared.walls import hidden
 from simulator.bees import Bee
 
 
@@ -56,6 +58,7 @@ def observe_bees(
     body_length_m: float,
     noise: Noise,
     rng: np.random.Generator,
+    walls: trimesh.Trimesh | None = None,
 ) -> tuple[tuple[float, float, float], ...]:
     """Report the bees one camera sees in one frame.
 
@@ -66,6 +69,7 @@ def observe_bees(
         body_length_m: Bee body length (m).
         noise: Noise settings (pixel sigma in px, dropout probability 0..1).
         rng: The simulation's random generator.
+        walls: Opaque walls inside the arena (arena frame, m), or None for none.
 
     Returns:
         One (u_px, v_px, size_px) entry per detected blob (overlapping bees merged), in
@@ -78,6 +82,7 @@ def observe_bees(
     all_distances_m = np.linalg.norm(all_points_m - pose.position_m, axis=1)
     # A bee closer than its own length covers the lens and gives no usable blob.
     seen = is_visible(pose, model, all_points_m) & (all_distances_m >= body_length_m)
+    seen &= ~hidden(walls, pose.position_m, all_points_m)
     if not seen.any():
         return ()
     points_m = all_points_m[seen]
