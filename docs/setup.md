@@ -189,10 +189,15 @@ side by side.
   speed, smoothed acceleration, state and number of cameras, live.
 - The strip at the bottom shows every camera's image points with the ID each was used for.
 - "Health" shows each node and turns red when a node has been silent for half a second.
+- "Skipped frames" under "Status" counts frames the tracker left out because the computer
+  was too busy. A few per minute do no harm; a steadily rising number means the computer is
+  overloaded (close other programs or lower "Speed of time").
+- When the track of the selected bee ends (for example two bees meet), "Track" shows
+  "none" and the robot stops. Select the bee again.
 - Selecting a bee sends it to the robot: in the simulator window the robot swings to it and
   follows it. The panel below the 3D view shows the robot's cinema picture on the left
   (while a simulator window is open) and the 16 camera panels on the right.
-- The purple robot is drawn from the robot's own `robot_pose` messages. "Show robot" hides it.
+- The robot is drawn from the robot's own `robot_pose` messages. "Show robot" hides it.
 - "Show camera IDs" (both windows) puts the camera ID next to each tracking camera. The
   LED on a camera is green while its node runs and red when it is stopped or silent.
 

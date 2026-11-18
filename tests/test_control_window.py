@@ -304,3 +304,11 @@ def test_camera_age_is_never_negative() -> None:
 def test_scene_carries_the_camera_minimum() -> None:
     """The page gets the warning threshold from the tracker settings, not a copy."""
     assert json.loads(scene_message(CONFIG, ROBOT))["min_cameras"] == CONFIG.tracker.min_cameras
+
+
+def test_only_the_newest_waiting_frames_are_tracked() -> None:
+    """When more frames wait than the backlog allows, the oldest are skipped."""
+    frames = [Frame(number, number / 60.0, {}) for number in range(5)]
+    assert [f.frame for f in main.newest_frames(frames, 2)] == [3, 4]
+    assert main.newest_frames(frames[:1], 2) == frames[:1]
+    assert main.newest_frames([], 2) == []

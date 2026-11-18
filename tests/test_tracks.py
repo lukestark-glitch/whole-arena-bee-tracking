@@ -35,6 +35,7 @@ SETTINGS = TrackerSettings(
     acceleration_smoothing_s=0.2,
     prediction_lead_s=0.1,
     node_silent_after_s=0.5,
+    max_backlog_frames=2,
 )
 DT_S = 1.0 / 60.0
 

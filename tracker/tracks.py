@@ -8,6 +8,7 @@ tracks with stable ids go out. All times are simulation time supplied by the cal
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -83,6 +84,12 @@ def create_track_set() -> TrackSet:
     return TrackSet(tracks=[], next_id=0)
 
 
+# The step is the frame period for nearly every track and frame, so the matrices of a few
+# recent steps are kept instead of being rebuilt for every track (a third of the filter time).
+_MATRIX_CACHE_SIZE = 64
+
+
+@lru_cache(maxsize=_MATRIX_CACHE_SIZE)
 def _transition_matrix(dt_s: float) -> np.ndarray:
     """Build the 9x9 constant-acceleration transition matrix.
 
@@ -90,12 +97,16 @@ def _transition_matrix(dt_s: float) -> np.ndarray:
         dt_s: Time step in s.
 
     Returns:
-        Shape (9, 9) matrix F acting on [positions, velocities, accelerations].
+        Shape (9, 9) matrix F acting on [positions, velocities, accelerations]. It is
+        shared between calls and read-only.
     """
     per_axis = np.array([[1.0, dt_s, dt_s**2 / 2.0], [0.0, 1.0, dt_s], [0.0, 0.0, 1.0]])
-    return np.kron(per_axis, np.eye(_AXES))
+    matrix = np.kron(per_axis, np.eye(_AXES))
+    matrix.flags.writeable = False
+    return matrix
 
 
+@lru_cache(maxsize=_MATRIX_CACHE_SIZE)
 def _process_noise(dt_s: float, jerk_sigma_m_s3: float) -> np.ndarray:
     """Build the 9x9 process noise for a jerk that is constant over the step.
 
@@ -107,10 +118,12 @@ def _process_noise(dt_s: float, jerk_sigma_m_s3: float) -> np.ndarray:
         jerk_sigma_m_s3: Standard deviation of the jerk in m/s^3.
 
     Returns:
-        Shape (9, 9) process noise covariance.
+        Shape (9, 9) process noise covariance. It is shared between calls and read-only.
     """
     g = np.array([dt_s**3 / 6.0, dt_s**2 / 2.0, dt_s])
-    return np.kron(np.outer(g, g), np.eye(_AXES)) * jerk_sigma_m_s3**2
+    noise = np.kron(np.outer(g, g), np.eye(_AXES)) * jerk_sigma_m_s3**2
+    noise.flags.writeable = False
+    return noise
 
 
 def predict_tracks(track_set: TrackSet, t_s: float, settings: TrackerSettings) -> None:
