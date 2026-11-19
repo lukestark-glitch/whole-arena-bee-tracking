@@ -3,6 +3,10 @@
 One entry per stage or notable change, newest first. Record measured results here when a
 stage asks for it.
 
+## 2026-11-19: README
+
+- README: short "About this project" section and an up-to-date status.
+
 ## 2026-11-18: Results paper
 
 - `docs/results-paper.pdf` and `docs/results-paper.html`: what was built, how to run it, and

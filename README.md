@@ -17,14 +17,23 @@ will be a moment later, and how far away it is.
 The full concept is in the [concept paper](docs/concept-paper.md), also available as
 [PDF](docs/concept-paper.pdf).
 
+## About this project
+
+I am a computer science student in my first semester, and this is a personal side project
+out of curiosity, not a university assignment. I am a fan of the video series and wondered
+how a robot could follow one chosen bee when several fly at once. I am still learning, so
+feedback, corrections and ideas are very welcome. Please open an issue.
+
 ## Status
 
-Early proof of concept. No hardware exists. Configuration, message formats, the
-simulator, the tracker with their windows, the emulated camera robot and the
-self-calibration are built (Stages 0 to 6). Experiments are next. First baseline: 0.44 mm mean position error with 10 simulated bees
-(see [`CHANGELOG.md`](CHANGELOG.md)). The plan is to build the
-tracking software and test it against a simulator that behaves like the hardware would.
-Progress is tracked in [`docs/implementation-plan.md`](docs/implementation-plan.md).
+Proof of concept, simulation only: no hardware exists. Stages 0 to 7 are done: configuration,
+messages, the simulator, the tracker with both windows, the emulated camera robot,
+self-calibration and the experiments. With 16 simulated cameras the tracker reaches about
+0.4 mm mean position error with 5 bees. An 8-camera layout works but does not meet the
+criterion set beforehand. All results are in the
+[results paper](docs/results-paper.pdf) and in [`CHANGELOG.md`](CHANGELOG.md). The robot
+values are assumptions until the real ones are known. Progress is tracked in
+[`docs/implementation-plan.md`](docs/implementation-plan.md).
 
 ## How it is organised
 
